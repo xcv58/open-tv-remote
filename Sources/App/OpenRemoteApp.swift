@@ -48,11 +48,22 @@ struct RootView: View {
             #if os(macOS)
             .frame(minWidth: 380, minHeight: 760)
             #endif
-            .sheet(isPresented: $model.showingDevices) { DevicesSheet() }
-            .sheet(isPresented: $model.showingKeyboard) { KeyboardSheet() }
-            .sheet(isPresented: $model.showingApps) { AppsSheet() }
+            .sheet(isPresented: $model.showingDevices, onDismiss: model.presentPendingRemoteShortcut) { DevicesSheet() }
+            .sheet(isPresented: $model.showingKeyboard, onDismiss: model.presentPendingRemoteShortcut) { KeyboardSheet() }
+            .sheet(isPresented: $model.showingApps, onDismiss: model.presentPendingRemoteShortcut) { AppsSheet() }
             #if os(iOS)
-            .sheet(isPresented: $model.showingSettings) { SettingsView() }
+            .sheet(isPresented: $model.showingSettings, onDismiss: model.presentPendingRemoteShortcut) { SettingsView() }
+            .fullScreenCover(isPresented: $model.showingJoystick) { JoystickScreen() }
+            .onOpenURL { model.handleRemoteShortcut($0) }
+            .alert("Pinned remote", isPresented: Binding {
+                model.remoteActivity.errorMessage != nil
+            } set: { if !$0 { model.remoteActivity.errorMessage = nil } }) {
+                Button("OK", role: .cancel) { model.remoteActivity.errorMessage = nil }
+            } message: {
+                Text(model.remoteActivity.errorMessage ?? "")
+            }
+            #else
+            .sheet(isPresented: $model.showingJoystick) { JoystickScreen() }
             #endif
             .sheet(isPresented: pairingPresented) { PairingSheet() }
             .animation(.snappy, value: model.state)

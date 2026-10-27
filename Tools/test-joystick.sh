@@ -6,7 +6,8 @@ package="$PWD/build/joystick-tests"
 mkdir -p "$package/Sources/JoystickCore" "$package/Tests/JoystickCoreTests"
 cp Sources/Core/RemoteKey.swift Sources/Core/JoystickInput.swift Sources/Core/TVDriver.swift Sources/Core/TVDevice.swift \
   Sources/Drivers/RokuDriver.swift Sources/Drivers/LGDriver.swift Tests/Support/RemoteTransportStubs.swift "$package/Sources/JoystickCore/"
-cp Tests/JoystickInputTests.swift Tests/RemoteDriverTests.swift "$package/Tests/JoystickCoreTests/"
+cp Shared/RemoteActivitySession.swift Sources/App/RemoteActivityController.swift "$package/Sources/JoystickCore/"
+cp Tests/JoystickInputTests.swift Tests/RemoteDriverTests.swift Tests/RemoteActivitySessionTests.swift Tests/RemoteActivityControllerTests.swift "$package/Tests/JoystickCoreTests/"
 cat > "$package/Package.swift" <<'PACKAGE'
 // swift-tools-version: 6.0
 import PackageDescription

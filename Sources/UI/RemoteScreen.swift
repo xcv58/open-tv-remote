@@ -3,7 +3,6 @@ import SwiftUI
 struct RemoteScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("padMode") private var mode: PadMode = .dpad
-    @State private var showingJoystick = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -47,21 +46,16 @@ struct RemoteScreen: View {
         .onAppear {
             focused = true
             #if DEBUG
-            if DemoMode.isEnabled && UserDefaults.standard.bool(forKey: "demoEyesFree") { showingJoystick = true }
+            if DemoMode.isEnabled && UserDefaults.standard.bool(forKey: "demoEyesFree") { model.showingJoystick = true }
             #endif
         }
-        #if os(iOS)
-        .fullScreenCover(isPresented: $showingJoystick) { JoystickScreen() }
-        #else
-        .sheet(isPresented: $showingJoystick) { JoystickScreen() }
-        #endif
     }
 
     private var navRow: some View {
         HStack(spacing: 12) {
             RemoteKeyButton(key: .back, symbol: "arrow.uturn.backward")
                 .frame(width: 58)
-            ModePicker(mode: $mode) { showingJoystick = true }
+            ModePicker(mode: $mode) { model.showingJoystick = true }
             RemoteKeyButton(key: .home, symbol: "house.fill")
                 .frame(width: 58)
         }
@@ -187,6 +181,10 @@ private struct TopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Choose which TV to control")
+
+            #if os(iOS)
+            RemoteActivityPinButton()
+            #endif
 
             KeyCap(shape: Circle(), accessibilityLabel: "Keyboard") {
                 model.showingKeyboard = true

@@ -9,6 +9,8 @@ settings:
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.2.0"
     CURRENT_PROJECT_VERSION: "1"
+    REMOTE_URL_SCHEME: openremote
+    REMOTE_ACTIVITY_BUNDLE_IDENTIFIER: com.natebutler.freeremote.remoteactivity
 targets:
   OpenRemote:
     type: application
@@ -19,10 +21,21 @@ targets:
     sources:
       - Sources
       - Resources
+      - Shared
+    dependencies:
+      - target: RemoteActivityExtension
+        destinationFilters: [iOS]
     info:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Open Remote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        RemoteURLScheme: $(REMOTE_URL_SCHEME)
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes: [$(REMOTE_URL_SCHEME)]
+        NSSupportsLiveActivities: true
         LSApplicationCategoryType: public.app-category.utilities
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Open Remote talks to TVs on your Wi-Fi network so it can control them.
@@ -50,6 +63,26 @@ targets:
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Resources/OpenRemote-macOS.entitlements
         CODE_SIGN_ENTITLEMENTS[sdk=iphone*]: Resources/OpenRemote-iOS.entitlements
         ENABLE_HARDENED_RUNTIME[sdk=macosx*]: YES
+
+  RemoteActivityExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [LiveActivity, Shared]
+    info:
+      path: build/RemoteActivity-Info.plist
+      properties:
+        CFBundleDisplayName: Open Remote Shortcut
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        RemoteURLScheme: $(REMOTE_URL_SCHEME)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(REMOTE_ACTIVITY_BUNDLE_IDENTIFIER)
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
 
   OpenRemoteUITests:
     type: bundle.ui-testing
