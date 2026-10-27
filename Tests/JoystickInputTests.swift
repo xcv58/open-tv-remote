@@ -116,7 +116,7 @@ private func eventually(_ condition: () -> Bool) async {
 @Suite("Eyes-free sending", .serialized)
 @MainActor
 struct JoystickSenderTests {
-    @Test func firmEngagementAndSparseSoftRepeatsFollowNewCommands() async {
+    @Test func firmEngagementAndRegularHoldPulsesFollowNewCommands() async {
         var time: TimeInterval = 0
         var pulses: [(TimeInterval, RemoteInputRequest.Feedback)] = []
         var count = 0
@@ -132,7 +132,9 @@ struct JoystickSenderTests {
         #expect(pulses.count > 2 && pulses.count < 15)
         #expect(pulses.dropFirst().allSatisfy { $0.1 == .soft })
         for (first, second) in zip(pulses, pulses.dropFirst()) {
-            #expect(second.0 - first.0 >= 0.7)
+            // With no transport delay, pulses stay within the intended cadence.
+            #expect(second.0 - first.0 >= 0.5)
+            #expect(second.0 - first.0 <= 0.61)
         }
         sender.stop()
     }
