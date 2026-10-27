@@ -63,6 +63,11 @@ targets:
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Resources/OpenRemote-macOS.entitlements
         CODE_SIGN_ENTITLEMENTS[sdk=iphone*]: Resources/OpenRemote-iOS.entitlements
         ENABLE_HARDENED_RUNTIME[sdk=macosx*]: YES
+      configs:
+        Release:
+          CODE_SIGN_STYLE[sdk=iphoneos*]: Manual
+          CODE_SIGN_IDENTITY[sdk=iphoneos*]: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]: Remote Lab App Store
 
   RemoteActivityExtension:
     type: app-extension
@@ -83,6 +88,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(REMOTE_ACTIVITY_BUNDLE_IDENTIFIER)
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Remote Lab Activity App Store
 
   OpenRemoteUITests:
     type: bundle.ui-testing
