@@ -75,6 +75,7 @@ struct RootView: View {
                 }
             }
             .task {
+                if scenePhase == .active { model.sceneDidBecomeActive() }
                 if model.devices.isEmpty { model.showingDevices = true }
             }
     }
@@ -115,6 +116,7 @@ private struct Pager: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .onAppear { page = stored }
+        .onChange(of: stored) { _, new in if page != new { page = new } }
         .onChange(of: page) { _, new in if let new { stored = new } }
     }
 }

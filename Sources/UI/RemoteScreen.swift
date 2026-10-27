@@ -206,7 +206,7 @@ private struct StatusLine: View {
         case .pairing: ("Pairing…", .yellow)
         case .unpaired: ("Not paired yet", .orange)
         case .failed: ("Not connected", Theme.power)
-        case .idle: (model.current == nil ? "No TV selected" : "Ready", Theme.secondary)
+        case .idle: (model.current == nil ? "No TV selected" : (model.isConnectionPaused ? "Disconnected" : "Ready"), Theme.secondary)
         }
         HStack(spacing: 5) {
             Circle().fill(color).frame(width: 6, height: 6)
@@ -227,6 +227,10 @@ private struct StatusBanner: View {
                  action: "Find TVs") { model.showingDevices = true }
         } else if let device = model.current {
             switch model.state {
+            case .idle where model.isConnectionPaused:
+                card(symbol: "wifi.slash", title: "Disconnected from \(device.name)",
+                     message: "Your pairing is saved. Connect when you’re ready to use the remote.",
+                     action: "Connect") { model.reconnect() }
             case .unpaired:
                 card(symbol: "link", title: "Pair with \(device.name)",
                      message: device.brand.pairingExplanation, action: "Pair") { model.startPairing() }

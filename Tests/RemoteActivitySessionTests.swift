@@ -6,6 +6,44 @@ import Testing
 struct RemoteActivitySessionTests {
     private let start = Date(timeIntervalSince1970: 1_000_000)
 
+    @Test func generalRemoteAndLegacyEyesFreeLinksHaveDistinctDestinations() throws {
+        let id = UUID()
+        let normal = try #require(RemoteActivityLink.url(for: id))
+        let stick = try #require(RemoteActivityLink.url(for: id, eyesFree: true))
+        #expect(normal.host == "remote")
+        #expect(!RemoteActivityLink.opensEyesFree(normal))
+        #expect(RemoteActivityLink.opensEyesFree(stick))
+        #expect(RemoteActivityLink.sessionID(in: normal) == id)
+        #expect(RemoteActivityLink.sessionID(in: stick) == id)
+    }
+
+    @Test func expandedActionsRequireTheCurrentSelectedSessionAndCannotReplay() {
+        let session = RemoteActivitySession(deviceID: "lg@192.0.2.10", tvName: "LG", now: start)
+        #expect(RemoteActivityPersistence.authorize(.disconnect, sessionID: session.id, session: session,
+                                                   selectedID: session.deviceID, at: start)?.deviceID == session.deviceID)
+        #expect(RemoteActivityPersistence.authorize(.disconnect, sessionID: UUID(), session: session,
+                                                   selectedID: session.deviceID, at: start) == nil)
+        #expect(RemoteActivityPersistence.authorize(.disconnect, sessionID: session.id, session: session,
+                                                   selectedID: "roku@192.0.2.20", at: start) == nil)
+        #expect(RemoteActivityPersistence.authorize(.disconnect, sessionID: session.id, session: nil,
+                                                   selectedID: session.deviceID, at: start) == nil)
+        #expect(RemoteActivityPersistence.authorize(.disconnect, sessionID: session.id, session: session,
+                                                   selectedID: session.deviceID, at: session.expiresAt) == nil)
+        #expect(RemoteActivityPersistence.authorize(.dismiss, sessionID: session.id, session: session,
+                                                   selectedID: session.deviceID, at: session.expiresAt) != nil)
+    }
+
+    @Test func dismissAndDisconnectHaveDifferentConnectionEffects() {
+        var dismissed = RemoteActivityOptions()
+        dismissed.apply(RemoteActivityActionEvent(action: .dismiss, deviceID: "test"))
+        #expect(!dismissed.allowsAutomatic(for: "test"))
+        #expect(dismissed.disconnectedDeviceID == nil)
+        var disconnected = RemoteActivityOptions()
+        disconnected.apply(RemoteActivityActionEvent(action: .disconnect, deviceID: "test"))
+        #expect(!disconnected.allowsAutomatic(for: "test"))
+        #expect(disconnected.disconnectedDeviceID == "test")
+    }
+
     @Test func shortcutContainsOnlyAnOpaqueNonce() throws {
         let session = RemoteActivitySession(deviceID: "lg@192.0.2.10", tvName: "Living Room", now: start)
         let url = try #require(RemoteActivityLink.url(for: session.id))

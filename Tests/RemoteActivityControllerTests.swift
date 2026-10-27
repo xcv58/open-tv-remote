@@ -44,12 +44,14 @@ private final class FakeRemoteActivitySystem: RemoteActivitySystem {
 @MainActor
 private final class SessionFixture {
     var data: Data?
+    var options = RemoteActivityOptions()
     var now = Date(timeIntervalSince1970: 1_000_000)
     let system = FakeRemoteActivitySystem()
     let device = TVDevice(name: "Living Room LG", brand: .lg, host: "192.0.2.10")
 
     func controller() -> RemoteActivityController {
         RemoteActivityController(system: system, load: { self.data }, save: { self.data = $0 },
+                                 loadOptions: { self.options }, saveOptions: { self.options = $0 },
                                  now: { self.now }, sleep: { _ in throw CancellationError() })
     }
     func restoreFixture() throws -> (RemoteActivitySession, FakeRemoteActivity) {
@@ -71,6 +73,57 @@ private func activityEventually(_ condition: () -> Bool) async {
 @Suite("Pinned remote lifecycle", .serialized)
 @MainActor
 struct RemoteActivityControllerTests {
+    @Test func automaticIsOnByDefaultAndDismissalSurvivesForegroundAndRelaunch() async {
+        let f = SessionFixture()
+        let controller = f.controller()
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        await activityEventually { controller.session != nil }
+        #expect(f.system.requests.count == 1)
+        controller.dismiss()
+        await activityEventually { f.system.activities.isEmpty }
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        let relaunched = f.controller()
+        relaunched.reconcile(selectedID: f.device.id)
+        relaunched.ensureAutomatic(f.device)
+        #expect(relaunched.session == nil)
+        #expect(f.system.requests.count == 1)
+        #expect(f.options.dismissedDeviceID == f.device.id)
+        #expect(f.options.disconnectedDeviceID == nil)
+    }
+
+    @Test func disconnectBlocksAutomaticRestartUntilExplicitResume() async {
+        let f = SessionFixture()
+        let controller = f.controller()
+        controller.ensureAutomatic(f.device)
+        await activityEventually { controller.session != nil }
+        controller.pauseConnection(f.device.id)
+        await activityEventually { f.system.activities.isEmpty }
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        #expect(controller.session == nil)
+        #expect(f.options.disconnectedDeviceID == f.device.id)
+        #expect(f.system.requests.count == 1)
+        controller.resume(f.device.id)
+        controller.ensureAutomatic(f.device)
+        await activityEventually { f.system.requests.count == 2 }
+        #expect(f.options.disconnectedDeviceID == nil)
+        controller.unpin()
+    }
+
+    @Test func automaticCanBeDisabledWithoutRemovingManualPinning() async {
+        let f = SessionFixture()
+        let controller = f.controller()
+        controller.setAutomatic(false, device: f.device)
+        controller.ensureAutomatic(f.device)
+        #expect(f.system.requests.isEmpty)
+        controller.pin(f.device)
+        await activityEventually { controller.session != nil }
+        #expect(!f.options.automatic)
+        controller.unpin()
+    }
+
     @Test func restorationReusesOnlyTheMatchingActivity() async throws {
         let f = SessionFixture()
         let (session, handle) = try f.restoreFixture()

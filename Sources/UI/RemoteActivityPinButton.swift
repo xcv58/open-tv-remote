@@ -8,8 +8,8 @@ struct RemoteActivityPinButton: View {
         let controller = model.remoteActivity
         let pinned = controller.session != nil
         Button {
-            if pinned { controller.unpin() }
-            else if let current = model.current { controller.pin(current) }
+            if pinned { controller.dismiss() }
+            else { model.pinRemoteActivity() }
         } label: {
             Group {
                 if controller.isBusy { ProgressView().controlSize(.small) }
@@ -20,7 +20,7 @@ struct RemoteActivityPinButton: View {
         }
         .buttonStyle(.plain)
         .disabled(model.current == nil || controller.isBusy)
-        .accessibilityLabel(pinned ? "Unpin remote" : "Pin remote to Dynamic Island and Lock Screen")
+        .accessibilityLabel(pinned ? "Dismiss remote shortcut" : "Show remote in Dynamic Island and Lock Screen")
         .accessibilityHint("The shortcut expires after 30 minutes without remote input.")
         .accessibilityIdentifier("pinRemoteActivity")
     }

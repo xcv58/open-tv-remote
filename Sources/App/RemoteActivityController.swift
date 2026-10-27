@@ -23,11 +23,14 @@ protocol RemoteActivitySystem: AnyObject {
 final class RemoteActivityController {
     private(set) var session: RemoteActivitySession?
     private(set) var isBusy = false
+    private(set) var options: RemoteActivityOptions
     var errorMessage: String?
 
     @ObservationIgnored private let system: any RemoteActivitySystem
     @ObservationIgnored private let load: () -> Data?
     @ObservationIgnored private let save: (Data?) -> Void
+    @ObservationIgnored private let loadOptions: () -> RemoteActivityOptions
+    @ObservationIgnored private let saveOptions: (RemoteActivityOptions) -> Void
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let sleep: (TimeInterval) async throws -> Void
     @ObservationIgnored private var activity: (any RemoteActivityHandle)?
@@ -36,22 +39,28 @@ final class RemoteActivityController {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var selectedID: String?
     @ObservationIgnored private var lastPublished = Date.distantPast
-    private static let storageKey = "remoteActivitySession.v1"
+    private static let storageKey = RemoteActivityPersistence.sessionKey
 
     init(system: any RemoteActivitySystem,
          load: (() -> Data?)? = nil,
          save: ((Data?) -> Void)? = nil,
+         loadOptions: @escaping () -> RemoteActivityOptions = { RemoteActivityPersistence.options() },
+         saveOptions: @escaping (RemoteActivityOptions) -> Void = { RemoteActivityPersistence.save($0) },
          now: @escaping () -> Date = Date.init,
          sleep: @escaping (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) {
         self.system = system
         self.load = load ?? { UserDefaults.standard.data(forKey: Self.storageKey) }
         self.save = save ?? { UserDefaults.standard.set($0, forKey: Self.storageKey) }
+        self.loadOptions = loadOptions
+        self.saveOptions = saveOptions
+        options = loadOptions()
         self.now = now
         self.sleep = sleep
     }
 
-    /// Restore only this app's explicitly pinned session. Never start an activity here.
+    /// Restore a known session. Automatic creation happens separately on foreground use.
     func reconcile(selectedID: String?) {
+        reloadOptions()
         if isBusy {
             if self.selectedID != selectedID { selectionChanged(to: selectedID) }
             return
@@ -60,7 +69,8 @@ final class RemoteActivityController {
         let stored = load()
             .flatMap { try? JSONDecoder().decode(RemoteActivitySession.self, from: $0) }
         let known = system.activities
-        guard let stored, stored.isValid(for: selectedID, at: now()),
+        guard let stored, options.dismissedDeviceID != selectedID, options.disconnectedDeviceID != selectedID,
+              stored.isValid(for: selectedID, at: now()),
               let match = known.first(where: {
                   $0.sessionID == stored.id && $0.isActive
               }) else { unpin(); return }
@@ -78,10 +88,48 @@ final class RemoteActivityController {
         unpin()
     }
 
-    func pin(_ device: TVDevice) {
+    func reloadOptions() { options = loadOptions() }
+
+    func resume(_ id: String) {
+        reloadOptions()
+        if options.dismissedDeviceID == id { options.dismissedDeviceID = nil }
+        if options.disconnectedDeviceID == id { options.disconnectedDeviceID = nil }
+        saveOptions(options)
+    }
+
+    func dismiss() {
+        if let selectedID {
+            options.apply(RemoteActivityActionEvent(action: .dismiss, deviceID: selectedID))
+            saveOptions(options)
+        }
+        unpin()
+    }
+
+    func pauseConnection(_ id: String) {
+        reloadOptions()
+        options.apply(RemoteActivityActionEvent(action: .disconnect, deviceID: id))
+        saveOptions(options)
+        unpin()
+    }
+
+    func setAutomatic(_ enabled: Bool, device: TVDevice?) {
+        options.automatic = enabled
+        if enabled { options.dismissedDeviceID = nil }
+        saveOptions(options)
+        if !enabled { unpin() }
+        else { ensureAutomatic(device) }
+    }
+
+    func ensureAutomatic(_ device: TVDevice?) {
+        reloadOptions()
+        guard let device, options.allowsAutomatic(for: device.id), session == nil, !isBusy, system.isEnabled else { return }
+        pin(device, reportErrors: false)
+    }
+
+    func pin(_ device: TVDevice, reportErrors: Bool = true) {
         guard !isBusy else { return }
         guard system.isEnabled else {
-            errorMessage = "Live Activities are turned off. Enable them for Open Remote in Settings to pin a remote."
+            if reportErrors { errorMessage = "Live Activities are turned off. Enable them for Open Remote in Settings to pin a remote." }
             return
         }
         selectedID = device.id
@@ -99,11 +147,13 @@ final class RemoteActivityController {
             await previous?.value
             for old in known { await old.end() }
             guard let self, token == self.generation, self.selectedID == device.id, !Task.isCancelled else { return }
-            let session = RemoteActivitySession(deviceID: device.id, tvName: device.name, now: self.now())
+            let session = RemoteActivitySession(deviceID: device.id, tvName: device.name, brandName: device.brand.shortName, now: self.now())
             do {
                 let activity = try self.system.request(session)
                 self.session = session
                 self.activity = activity
+                self.options.dismissedDeviceID = nil
+                self.saveOptions(self.options)
                 self.persist()
                 self.lastPublished = session.lastInteraction
                 self.observe(activity)
@@ -112,7 +162,7 @@ final class RemoteActivityController {
                 self.session = nil
                 self.activity = nil
                 self.persist()
-                self.errorMessage = "Couldn’t pin the remote. Check that Live Activities are allowed, then try again."
+                if reportErrors { self.errorMessage = "Couldn’t pin the remote. Check that Live Activities are allowed, then try again." }
             }
         }
     }
@@ -185,7 +235,7 @@ final class RemoteActivityController {
         self.activity?.onEnded = nil
         activity.onEnded = { [weak self, weak activity] in
             guard let self, let activity, self.activity?.id == activity.id else { return }
-            self.unpin()
+            self.dismiss()
         }
     }
 

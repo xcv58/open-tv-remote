@@ -17,6 +17,20 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
 
+                #if os(iOS)
+                Section {
+                    Toggle("Show remote automatically", isOn: Binding {
+                        model.remoteActivity.options.automatic
+                    } set: {
+                        model.remoteActivity.setAutomatic($0, device: model.current)
+                    })
+                } header: {
+                    Text("Dynamic Island and Lock Screen")
+                } footer: {
+                    Text("Show a shortcut for your selected TV. Dismiss hides it until you select a TV or show the shortcut again.")
+                }
+                #endif
+
                 JellyfinSettingsSection()
 
                 if model.jellyfin.isReady && !model.jellyfin.pins.isEmpty {

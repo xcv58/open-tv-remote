@@ -22,7 +22,8 @@ final class ActivityKitRemoteActivitySystem: RemoteActivitySystem {
     }
 
     static func content(for session: RemoteActivitySession) -> ActivityContent<RemoteActivityAttributes.ContentState> {
-        ActivityContent(state: .init(tvName: session.tvName, expiresAt: session.expiresAt), staleDate: session.expiresAt)
+        let brand = session.brandName ?? TVBrand(rawValue: String(session.deviceID.split(separator: "@").first ?? ""))?.shortName
+        return ActivityContent(state: .init(tvName: session.tvName, expiresAt: session.expiresAt, brandName: brand), staleDate: session.expiresAt)
     }
 }
 

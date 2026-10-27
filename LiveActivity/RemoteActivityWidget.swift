@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -10,42 +11,36 @@ struct RemoteActivityWidgets: WidgetBundle {
 struct RemoteActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RemoteActivityAttributes.self) { context in
-            HStack(spacing: 14) {
-                Image(systemName: "av.remote.fill").font(.title)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(context.state.tvName).font(.headline).lineLimit(1)
-                    Text(context.isStale ? "Session expired · Open app to pin again" : "Tap to open eyes-free remote")
-                        .font(.subheadline)
-                    if !context.isStale {
-                        Text("Expires \(context.state.expiresAt, style: .relative)")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "av.remote.fill").font(.title2).foregroundStyle(.mint)
+                    title(context)
+                    Spacer(minLength: 0)
+                    dismissButton(context.attributes.sessionID)
                 }
-                Spacer(minLength: 0)
+                controls(context)
             }
-            .padding()
+            .padding(14)
             .activityBackgroundTint(.black)
             .activitySystemActionForegroundColor(.white)
             .widgetURL(RemoteActivityLink.url(for: context.attributes.sessionID))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: "av.remote.fill").foregroundStyle(.mint)
+                    Label("Remote", systemImage: "av.remote.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.mint)
+                        .padding(.leading, 6)
                 }
-                DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.tvName).font(.headline).lineLimit(1)
+                DynamicIslandExpandedRegion(.trailing) {
+                    dismissButton(context.attributes.sessionID).padding(.trailing, 6)
                 }
+                // The full name belongs below the camera, where it can wrap.
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 4) {
-                        Label(context.isStale ? "Session expired · Open app" : "Open eyes-free remote",
-                              systemImage: context.isStale ? "clock.badge.exclamationmark" : "l.joystick.tilt.up.fill")
-                            .font(.subheadline)
-                        if !context.isStale {
-                            Text("Expires \(context.state.expiresAt, style: .relative)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                    VStack(alignment: .leading, spacing: 12) {
+                        title(context)
+                        controls(context)
                     }
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 12)
                 }
             } compactLeading: {
                 Image(systemName: "av.remote.fill").foregroundStyle(.mint)
@@ -53,7 +48,8 @@ struct RemoteActivityWidget: Widget {
                 if context.isStale {
                     Image(systemName: "clock.badge.exclamationmark").accessibilityLabel("Remote session expired")
                 } else {
-                    Text(context.state.tvName).lineLimit(1).frame(maxWidth: 70)
+                    Text(context.state.brandName ?? String(context.state.tvName.split(separator: " ").first ?? "TV"))
+                        .font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
                 }
             } minimal: {
                 Image(systemName: context.isStale ? "clock.badge.exclamationmark" : "av.remote.fill")
@@ -62,10 +58,50 @@ struct RemoteActivityWidget: Widget {
             .keylineTint(.mint)
         }
     }
+
+    private func title(_ context: ActivityViewContext<RemoteActivityAttributes>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(context.state.tvName).font(.headline).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if context.isStale { Text("Session expired").font(.caption).foregroundStyle(.secondary) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func controls(_ context: ActivityViewContext<RemoteActivityAttributes>) -> some View {
+        HStack(spacing: 10) {
+            if let url = RemoteActivityLink.url(for: context.attributes.sessionID) {
+                Link(destination: url) {
+                    Label("Open remote", systemImage: "av.remote")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(.mint, in: Capsule()).foregroundStyle(.black)
+                }
+            }
+            if !context.isStale {
+                Button(intent: DisconnectRemoteActivityIntent(sessionID: context.attributes.sessionID)) {
+                    Label("Disconnect", systemImage: "wifi.slash")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(.white.opacity(0.14), in: Capsule()).foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+    }
+
+    private func dismissButton(_ id: UUID) -> some View {
+        Button(intent: DismissRemoteActivityIntent(sessionID: id)) {
+            Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+                .frame(width: 44, height: 44).contentShape(Circle())
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain).accessibilityLabel("Dismiss remote shortcut")
+    }
 }
 
-#Preview("Pinned remote", as: .content, using: RemoteActivityAttributes(sessionID: UUID())) {
+#Preview("Remote session", as: .content, using: RemoteActivityAttributes(sessionID: UUID())) {
     RemoteActivityWidget()
 } contentStates: {
-    RemoteActivityAttributes.ContentState(tvName: "Living Room LG", expiresAt: Date().addingTimeInterval(1800))
+    RemoteActivityAttributes.ContentState(tvName: "Roku Streaming Stick Plus", expiresAt: Date().addingTimeInterval(1800), brandName: "Roku")
 }
