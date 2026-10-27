@@ -116,6 +116,57 @@ private func eventually(_ condition: () -> Bool) async {
 @Suite("Eyes-free sending", .serialized)
 @MainActor
 struct JoystickSenderTests {
+    @Test func firmEngagementAndSparseSoftRepeatsFollowNewCommands() async {
+        var time: TimeInterval = 0
+        var pulses: [(TimeInterval, RemoteInputRequest.Feedback)] = []
+        var count = 0
+        let sender = JoystickSender(send: { _, request in
+            count += 1
+            if request.feedback != .none { pulses.append((time, request.feedback)) }
+        }, sleep: { delay in
+            time += delay == .milliseconds(420) ? 0.42 : 0.18
+        }, now: { time })
+        sender.hold(.right)
+        await eventually { count == 41 }
+        #expect(pulses.first?.1 == .firm)
+        #expect(pulses.count > 2 && pulses.count < 15)
+        #expect(pulses.dropFirst().allSatisfy { $0.1 == .soft })
+        for (first, second) in zip(pulses, pulses.dropFirst()) {
+            #expect(second.0 - first.0 >= 0.7)
+        }
+        sender.stop()
+    }
+
+    @Test func stalledTransportDoesNotProduceAnIndependentHapticHeartbeat() async {
+        let gate = TransportGate()
+        var time: TimeInterval = 0
+        let sender = JoystickSender(send: gate.send, now: { time })
+        sender.hold(.right)
+        await eventually { gate.requests.count == 1 }
+        time = 10
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(gate.requests.count == 1)
+        #expect(gate.requests[0].feedback == .firm)
+        sender.release()
+        gate.complete()
+        try? await Task.sleep(for: .milliseconds(25))
+        #expect(gate.requests.count == 1)
+    }
+
+    @Test func directionChangeGetsFirmFeedbackWithinTheRepeatCooldown() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send, now: { 0 })
+        sender.hold(.right)
+        await eventually { gate.requests.count == 1 }
+        sender.hold(.down)
+        gate.complete()
+        await eventually { gate.requests.count == 2 }
+        #expect(gate.requests[0].feedback == .firm)
+        #expect(gate.requests[1].feedback == .firm)
+        sender.stop()
+        gate.complete()
+    }
+
     @Test func liftingDuringSlowTransportDiscardsAllRepeats() async {
         let gate = TransportGate()
         let sender = JoystickSender(send: gate.send)

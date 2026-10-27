@@ -54,11 +54,15 @@ struct JoystickGesture {
 /// its turn can discard stale input without cancelling a shared WebSocket.
 @MainActor
 final class RemoteInputRequest {
-    /// Held repeats stay silent: transport completion does not confirm TV movement.
+    enum Feedback { case firm, soft, none }
     let isRepeat: Bool
+    let feedback: Feedback
     private(set) var isCancelled = false
 
-    init(isRepeat: Bool = false) { self.isRepeat = isRepeat }
+    init(isRepeat: Bool = false, feedback: Feedback = .firm) {
+        self.isRepeat = isRepeat
+        self.feedback = feedback
+    }
     func cancel() { isCancelled = true }
 }
 
@@ -84,6 +88,8 @@ final class JoystickSender {
 
     private let send: (RemoteKey, RemoteInputRequest) async -> Void
     private let sleep: (Duration) async throws -> Void
+    private let now: () -> TimeInterval
+    private var lastFeedback: TimeInterval?
     private var pending: [Command] = []
     private var active: (request: RemoteInputRequest, repeats: Bool)?
     private var held: RemoteKey?
@@ -93,9 +99,11 @@ final class JoystickSender {
     private var pause: Task<Void, Error>?
 
     init(send: @escaping (RemoteKey, RemoteInputRequest) async -> Void,
-         sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+         sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.send = send
         self.sleep = sleep
+        self.now = now
     }
 
     func hold(_ direction: RemoteKey?) {
@@ -125,6 +133,7 @@ final class JoystickSender {
         else { pending.removeAll { $0.repeats } }
         if cancelPresses || active?.repeats == true { active?.request.cancel() }
         repeats = 0
+        lastFeedback = nil
         pause?.cancel()
     }
 
@@ -138,7 +147,17 @@ final class JoystickSender {
         while !pending.isEmpty {
             let command = pending.removeFirst()
             let token = generation
-            let request = RemoteInputRequest(isRepeat: command.isRepeat)
+            let time = now()
+            let feedback: RemoteInputRequest.Feedback
+            if !command.isRepeat {
+                feedback = .firm
+            } else if let lastFeedback, time - lastFeedback >= 0.7 {
+                feedback = .soft
+            } else {
+                feedback = .none
+            }
+            if feedback != .none { lastFeedback = time }
+            let request = RemoteInputRequest(isRepeat: command.isRepeat, feedback: feedback)
             active = (request, command.repeats)
             await send(command.key, request)
             active = nil
