@@ -219,7 +219,7 @@ private struct StatusBanner: View {
     var body: some View {
         if model.current == nil {
             card(symbol: "sparkle.magnifyingglass", title: "Let's find your TV",
-                 message: "Open Remote works with Google TV, Android TV, Roku, Samsung and LG TVs on your Wi-Fi.",
+                 message: "Remote Lab works with Google TV, Android TV, Roku, Samsung and LG TVs on your Wi-Fi.",
                  action: "Find TVs") { model.showingDevices = true }
         } else if let device = model.current {
             switch model.state {

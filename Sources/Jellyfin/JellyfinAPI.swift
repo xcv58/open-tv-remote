@@ -35,7 +35,7 @@ struct JellyfinAPI: Sendable {
         #else
         let device = "iPhone"
         #endif
-        var fields = ["Client=\"Open Remote\"", "Device=\"\(device)\"", "DeviceId=\"\(deviceID)\"", "Version=\"1.0\""]
+        var fields = ["Client=\"Remote Lab\"", "Device=\"\(device)\"", "DeviceId=\"\(deviceID)\"", "Version=\"1.0\""]
         if let token { fields.append("Token=\"\(token)\"") }
         return "MediaBrowser " + fields.joined(separator: ", ")
     }

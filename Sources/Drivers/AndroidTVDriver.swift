@@ -344,7 +344,7 @@ final class AndroidTVDriver: TVDriver {
         #else
         let kind = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
         #endif
-        return "Open Remote (\(kind) \(ClientIdentity.shortID(of: certificate)))"
+        return "Remote Lab (\(kind) \(ClientIdentity.shortID(of: certificate)))"
     }
 
     private static func describe(_ error: NWError?) -> String {

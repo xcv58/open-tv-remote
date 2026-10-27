@@ -48,7 +48,7 @@ final class SamsungDriver: TVDriver {
 
     private func open(prompting: Bool) {
         socket?.close()
-        let name = Data("Open Remote".utf8).base64EncodedString()
+        let name = Data("Remote Lab".utf8).base64EncodedString()
         var components = URLComponents(string: "wss://\(device.host):8002/api/v2/channels/samsung.remote.control")!
         components.queryItems = [URLQueryItem(name: "name", value: name)]
         if let token = device.token, !token.isEmpty {

@@ -5,6 +5,14 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingDevices = false
 
+    private var openSourceLicense: String {
+        guard let url = Bundle.main.url(forResource: "OpenRemote-LICENSE", withExtension: "txt"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return "The MIT License is also available in the source repository’s LICENSE file."
+        }
+        return text
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -70,11 +78,23 @@ struct SettingsView: View {
                         Label("Free and open source", systemImage: "heart.fill")
                             .font(.headline)
                             .foregroundStyle(Theme.accent)
-                        Text("No subscriptions, no trials, no ads, no tracking, no account. Open Remote talks directly to your TV over your Wi-Fi and nothing leaves your home network.")
+                        Text("Remote Lab is an independent fork of Open TV Remote by Nathan Butler, released under the MIT License. No ads, analytics or tracking. TV commands stay on your local network; saved TV details and interface preferences can sync through your iCloud account. TV pairing credentials are excluded from settings sync. Optional Jellyfin sign-in tokens can sync through iCloud Keychain.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                        Link("View the source on GitHub", destination: URL(string: "https://github.com/iamnbutler/open-tv-remote")!)
+                        Link("View the fork on GitHub", destination: URL(string: "https://github.com/xcv58/open-tv-remote")!)
                             .font(.footnote.weight(.semibold))
+                        Link("Original project by Nathan Butler", destination: URL(string: "https://github.com/iamnbutler/open-tv-remote")!)
+                            .font(.footnote)
+                        NavigationLink("Open-source license") {
+                            ScrollView {
+                                Text(openSourceLicense)
+                                    .font(.footnote.monospaced())
+                                    .textSelection(.enabled)
+                                    .padding()
+                            }
+                            .navigationTitle("MIT License")
+                        }
+                        .font(.footnote)
                     }
                     .padding(.vertical, 4)
                 }

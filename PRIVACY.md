@@ -1,14 +1,14 @@
-# Privacy policy
+# Remote Lab privacy policy
 
-_Last updated: October 10, 2026_
+_Last updated: October 27, 2026_
 
-Open Remote does not collect, store, or share any personal data.
+Remote Lab is an independent fork of Open TV Remote. Jenny Media LLC does not operate an app server and does not collect analytics, advertising identifiers or tracking data. No developer account is required in the app.
 
-- **No accounts, analytics, advertising, or tracking.** The app contains no third-party SDKs.
-- **No servers.** The app only communicates with TVs on your local network, directly from your device. Nothing is sent to the developer or any third party.
-- **Stored on your device only:** the list of TVs you've added (name, brand, and network address), the pairing credentials your TVs issue, and your interface preferences. Pairing keys are kept in your device's keychain. Deleting the app removes all of this.
-- **Local network access** is used solely to find and control your TVs.
+- **Local network:** discovery and TV commands go directly from your device to devices on your network. Local Network permission is used to find and control TVs. Discovery runs in the device chooser, which opens automatically on first launch, and when recovering a saved TV whose network address changed. You can deny Local Network access. Pairing and TV control actions are user initiated.
+- **Local storage:** the app saves TV names, brands, network and MAC addresses when available, model information, interface preferences, and any Jellyfin server and pinned items you configure. Samsung and LG pairing tokens are saved in the app’s local storage. Android TV client keys and certificates are stored in this device’s keychain. TV pairing credentials are excluded from the app’s iCloud settings sync.
+- **iCloud:** if iCloud key-value storage is available, saved TV details (name, brand, network and MAC addresses, and model), visible-app preferences, and Jellyfin settings and pins (including server address and user name and ID) can sync through your Apple iCloud account to your devices running Remote Lab. This beta uses a separate iCloud namespace from Open Remote Test and the original app. Synced settings are processed by Apple under your iCloud settings and Apple’s privacy policy. Deleting the app does not necessarily delete keychain entries or settings already stored in iCloud.
+- **Jellyfin:** optional Jellyfin requests go to the server you choose. That server may be outside your home network, depending on its address and configuration. Its operator controls its own logs and privacy practices. Jellyfin authentication tokens are saved in the keychain with iCloud Keychain synchronization enabled, subject to your Apple account and device settings.
+- **Live Activities:** the selected TV’s name and brand can appear on your Lock Screen and Dynamic Island. You can stop the remote session or turn off automatic display in the app’s Settings. Activity links contain an opaque session identifier, not a TV address or pairing token.
+- **TestFlight:** Apple processes beta installation, crash and feedback information through TestFlight. If you submit feedback, Apple may share it with the developer. Apple’s privacy policy and TestFlight terms govern that service.
 
-Open Remote is open source, so you can verify all of this yourself: [github.com/iamnbutler/open-tv-remote](https://github.com/iamnbutler/open-tv-remote).
-
-Questions? [Open an issue on GitHub](https://github.com/iamnbutler/open-tv-remote/issues).
+Source and support: [xcv58/open-tv-remote](https://github.com/xcv58/open-tv-remote). Original project: [iamnbutler/open-tv-remote](https://github.com/iamnbutler/open-tv-remote). Open-source and asset notices are preserved in the app and repository.

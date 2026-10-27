@@ -31,7 +31,7 @@ enum TVBrand: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .androidTV: "Your TV will show a 6-character code. Type it here to finish pairing."
         case .roku: "Roku TVs don't need pairing."
-        case .samsung: "Your TV will ask whether to allow Open Remote. Choose Allow with your regular remote."
+        case .samsung: "Your TV will ask whether to allow Remote Lab. Choose Allow with your regular remote."
         case .lg: "Your TV will ask whether to accept the connection. Choose Accept with your regular remote."
         }
     }

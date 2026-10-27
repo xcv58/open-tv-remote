@@ -146,7 +146,7 @@ final class RemoteActivityController {
     func pin(_ device: TVDevice, reportErrors: Bool = true) {
         guard !isBusy else { return }
         guard system.isEnabled else {
-            if reportErrors { errorMessage = "Live Activities are turned off. Enable them for Open Remote in Settings to pin a remote." }
+            if reportErrors { errorMessage = "Live Activities are turned off. Enable them for Remote Lab in Settings to pin a remote." }
             return
         }
         selectedID = device.id
