@@ -19,6 +19,8 @@ enum Haptics {
     #if os(iOS)
     private static let light = UIImpactFeedbackGenerator(style: .light)
     private static let rigid = UIImpactFeedbackGenerator(style: .rigid)
+    private static let firm = UIImpactFeedbackGenerator(style: .medium)
+    private static let soft = UIImpactFeedbackGenerator(style: .soft)
     #endif
 
     static func tap() {
@@ -30,6 +32,18 @@ enum Haptics {
     static func tick() {
         #if os(iOS)
         rigid.impactOccurred(intensity: 0.6)
+        #endif
+    }
+
+    static func joystickStart() {
+        #if os(iOS)
+        firm.impactOccurred(intensity: 0.8)
+        #endif
+    }
+
+    static func joystickRepeat() {
+        #if os(iOS)
+        soft.impactOccurred(intensity: 0.35)
         #endif
     }
 }
