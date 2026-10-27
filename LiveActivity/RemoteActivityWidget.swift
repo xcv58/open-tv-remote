@@ -15,8 +15,6 @@ struct RemoteActivityWidget: Widget {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "av.remote.fill").font(.title2).foregroundStyle(.mint)
                     title(context)
-                    Spacer(minLength: 0)
-                    dismissButton(context.attributes.sessionID)
                 }
                 controls(context)
             }
@@ -37,9 +35,6 @@ struct RemoteActivityWidget: Widget {
                         .padding(.leading, 6)
                         .accessibilityLabel("Open eyes-free")
                     }
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    dismissButton(context.attributes.sessionID).padding(.trailing, 6)
                 }
                 // The full name belongs below the camera, where it can wrap.
                 DynamicIslandExpandedRegion(.bottom) {
@@ -101,14 +96,6 @@ struct RemoteActivityWidget: Widget {
         .font(.subheadline.weight(.semibold))
     }
 
-    private func dismissButton(_ id: UUID) -> some View {
-        Button(intent: DismissRemoteActivityIntent(sessionID: id)) {
-            Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
-                .frame(width: 44, height: 44).contentShape(Circle())
-                .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain).accessibilityLabel("Dismiss remote shortcut")
-    }
 }
 
 #Preview("Remote session", as: .content, using: RemoteActivityAttributes(sessionID: UUID())) {
