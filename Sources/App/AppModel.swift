@@ -206,7 +206,23 @@ final class AppModel: TVDriverDelegate {
 
     // MARK: Commands
 
+    #if DEBUG
+    private(set) var demoInputCount = 0
+    private(set) var demoLastInput = "None"
+    #endif
+
     func press(_ key: RemoteKey) { driver?.send(key) }
+
+    func pressInteractively(_ key: RemoteKey, request: RemoteInputRequest) async {
+        guard state == .connected, !request.isCancelled, !Task.isCancelled else { return }
+        #if DEBUG
+        if DemoMode.isEnabled {
+            demoInputCount += 1
+            demoLastInput = key.accessibilityName
+        }
+        #endif
+        await driver?.sendInteractive(key, request: request)
+    }
 
     func supports(_ key: RemoteKey) -> Bool { driver?.supports(key) ?? true }
 

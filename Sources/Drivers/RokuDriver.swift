@@ -49,6 +49,17 @@ final class RokuDriver: TVDriver {
         enqueue("keypress/\(name)")
     }
 
+    func sendInteractive(_ key: RemoteKey, request: RemoteInputRequest) async {
+        guard state == .connected, !request.isCancelled, !Task.isCancelled,
+              let name = Self.keyName(key) else { return }
+        let operation = enqueue("keypress/" + name, request: request)
+        await withTaskCancellationHandler {
+            await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
     func sendText(_ text: String) {
         for scalar in text.unicodeScalars {
             let encoded = String(scalar).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
@@ -67,14 +78,19 @@ final class RokuDriver: TVDriver {
         }
     }
 
-    private func enqueue(_ path: String) {
+    @discardableResult
+    private func enqueue(_ path: String, request: RemoteInputRequest? = nil) -> Task<Void, Never> {
         let previous = queue
         // Percent-encoded paths must not be re-encoded by appending(path:).
         let url = URL(string: base.absoluteString + "/" + path)!
-        queue = Task { [weak self] in
+        let operation = Task { @MainActor [weak self] in
             await previous?.value
-            let status = await LocalHTTP.post(url, timeout: 3)
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
+            if let request {
+                guard !request.isCancelled, self.state == .connected else { return }
+            }
+            let status = await LocalHTTP.post(url, timeout: request == nil ? 3 : 2)
+            guard !Task.isCancelled, request?.isCancelled != true else { return }
             switch status {
             case 200?, 202?, 204?:
                 if self.state != .connected { self.state = .connected }
@@ -86,6 +102,8 @@ final class RokuDriver: TVDriver {
                 break
             }
         }
+        queue = operation
+        return operation
     }
 
     private static func keyName(_ key: RemoteKey) -> String? {
