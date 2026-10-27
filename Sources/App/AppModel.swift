@@ -15,7 +15,17 @@ final class AppModel: TVDriverDelegate {
     var showingKeyboard = false
     var showingApps = false
     var showingSettings = false
-    var showingJoystick = false
+    var showingJoystick = false {
+        didSet {
+            #if os(iOS)
+            #if DEBUG
+            if DemoMode.isEnabled { return }
+            #endif
+            // Persist the chosen view only. Gesture state and queued input stay ephemeral.
+            UserDefaults.standard.set(showingJoystick, forKey: "remoteView.eyesFree.v1")
+            #endif
+        }
+    }
     #if os(iOS)
     let remoteActivity = AppModel.makeRemoteActivityController()
     private var pendingRemoteShortcut: URL?
@@ -67,6 +77,9 @@ final class AppModel: TVDriverDelegate {
             MainActor.assumeIsolated { self?.handleRemoteActivityAction(event) }
         }
         remoteActivity.reconcile(selectedID: currentID)
+        if current != nil, !isConnectionPaused {
+            showingJoystick = UserDefaults.standard.bool(forKey: "remoteView.eyesFree.v1")
+        }
         #endif
         NotificationCenter.default.addObserver(forName: CloudSettings.didChange, object: nil, queue: .main) { [weak self] note in
             let keys = note.userInfo?["keys"] as? [String] ?? []
@@ -250,6 +263,12 @@ final class AppModel: TVDriverDelegate {
         guard remoteActivity.accepts(url, selectedID: currentID) else { return }
         // Pairing is an explicit flow and must not be hidden by an external link.
         if case .pairing = state { return }
+        pendingRemoteShortcut = nil
+        // The main Island tap resumes the existing page, mode and any open sheet.
+        guard RemoteActivityLink.opensEyesFree(url) else {
+            remoteActivity.noteInteraction()
+            return
+        }
         pendingRemoteShortcut = url
         let dismissing = showingDevices || showingKeyboard || showingApps || showingSettings
         showingDevices = false
@@ -269,7 +288,7 @@ final class AppModel: TVDriverDelegate {
         if case .pairing = state { return }
         remoteActivity.noteInteraction()
         UserDefaults.standard.set(0, forKey: "page")
-        showingJoystick = RemoteActivityLink.opensEyesFree(url)
+        showingJoystick = true
         #endif
     }
 

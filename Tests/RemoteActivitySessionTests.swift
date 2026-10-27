@@ -6,7 +6,7 @@ import Testing
 struct RemoteActivitySessionTests {
     private let start = Date(timeIntervalSince1970: 1_000_000)
 
-    @Test func generalRemoteAndLegacyEyesFreeLinksHaveDistinctDestinations() throws {
+    @Test func resumeAndExplicitEyesFreeLinksHaveDistinctDestinations() throws {
         let id = UUID()
         let normal = try #require(RemoteActivityLink.url(for: id))
         let stick = try #require(RemoteActivityLink.url(for: id, eyesFree: true))
@@ -116,5 +116,9 @@ struct RemoteActivitySessionTests {
         let url = try #require(RemoteActivityLink.url(for: id, scheme: "openremotetest"))
         #expect(RemoteActivityLink.sessionID(in: url, scheme: "openremotetest") == id)
         #expect(RemoteActivityLink.sessionID(in: url, scheme: "openremote") == nil)
+        let eyesFree = try #require(RemoteActivityLink.url(for: id, scheme: "openremotetest", eyesFree: true))
+        #expect(RemoteActivityLink.opensEyesFree(eyesFree))
+        #expect(RemoteActivityLink.sessionID(in: eyesFree, scheme: "openremotetest") == id)
+        #expect(RemoteActivityLink.sessionID(in: eyesFree, scheme: "openremote") == nil)
     }
 }

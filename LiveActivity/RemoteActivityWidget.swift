@@ -27,9 +27,16 @@ struct RemoteActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("Remote", systemImage: "av.remote.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.mint)
+                    if let url = RemoteActivityLink.url(for: context.attributes.sessionID, eyesFree: true) {
+                        Link(destination: url) {
+                            Label("Open eyes-free", systemImage: "hand.draw")
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.mint)
+                                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
                         .padding(.leading, 6)
+                        .accessibilityLabel("Open eyes-free")
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     dismissButton(context.attributes.sessionID).padding(.trailing, 6)
@@ -73,7 +80,7 @@ struct RemoteActivityWidget: Widget {
         HStack(spacing: 10) {
             if let url = RemoteActivityLink.url(for: context.attributes.sessionID) {
                 Link(destination: url) {
-                    Label("Open remote", systemImage: "av.remote")
+                    Label("Resume remote", systemImage: "av.remote")
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(.mint, in: Capsule()).foregroundStyle(.black)
                 }
