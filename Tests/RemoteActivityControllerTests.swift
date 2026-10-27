@@ -73,6 +73,62 @@ private func activityEventually(_ condition: () -> Bool) async {
 @Suite("Pinned remote lifecycle", .serialized)
 @MainActor
 struct RemoteActivityControllerTests {
+    @Test func systemDismissalWhileProcessWasAbsentSurvivesRelaunch() async throws {
+        let f = SessionFixture()
+        _ = try f.restoreFixture()
+        f.system.handles.removeAll() // No live observer received the system dismissal.
+        let controller = f.controller()
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        await activityEventually { !controller.isBusy }
+        #expect(controller.session == nil)
+        #expect(f.system.requests.isEmpty)
+        #expect(f.options.dismissedDeviceID == f.device.id)
+        #expect(f.options.disconnectedDeviceID == nil)
+
+        let relaunched = f.controller()
+        relaunched.reconcile(selectedID: f.device.id)
+        relaunched.ensureAutomatic(f.device)
+        #expect(relaunched.session == nil)
+        #expect(f.system.requests.isEmpty)
+
+        // With no pin button, explicitly re-enabling the setting can show it again.
+        relaunched.setAutomatic(false, device: f.device)
+        relaunched.setAutomatic(true, device: f.device)
+        await activityEventually { relaunched.session != nil }
+        #expect(f.system.requests.count == 1)
+        #expect(f.options.dismissedDeviceID == nil)
+        relaunched.unpin()
+    }
+
+    @Test func missingExpiredActivityDoesNotSuppressANewForegroundSession() async throws {
+        let f = SessionFixture()
+        let (session, _) = try f.restoreFixture()
+        f.system.handles.removeAll()
+        f.now = session.expiresAt
+        let controller = f.controller()
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        await activityEventually { controller.session != nil }
+        #expect(f.options.dismissedDeviceID == nil)
+        #expect(f.system.requests.count == 1)
+        controller.unpin()
+    }
+
+    @Test func missingActivityForAnotherTVDoesNotSuppressTheSelection() async throws {
+        let f = SessionFixture()
+        _ = try f.restoreFixture()
+        f.system.handles.removeAll()
+        let other = TVDevice(name: "Other TV", brand: .roku, host: "192.0.2.20")
+        let controller = f.controller()
+        controller.reconcile(selectedID: other.id)
+        controller.ensureAutomatic(other)
+        await activityEventually { controller.session != nil }
+        #expect(controller.session?.deviceID == other.id)
+        #expect(f.options.dismissedDeviceID == nil)
+        controller.unpin()
+    }
+
     @Test func automaticIsOnByDefaultAndDismissalSurvivesForegroundAndRelaunch() async {
         let f = SessionFixture()
         let controller = f.controller()

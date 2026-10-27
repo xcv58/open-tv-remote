@@ -182,10 +182,6 @@ private struct TopBar: View {
             .buttonStyle(.plain)
             .accessibilityHint("Choose which TV to control")
 
-            #if os(iOS)
-            RemoteActivityPinButton()
-            #endif
-
             KeyCap(shape: Circle(), accessibilityLabel: "Keyboard") {
                 model.showingKeyboard = true
             } label: {

@@ -27,7 +27,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Dynamic Island and Lock Screen")
                 } footer: {
-                    Text("Show a shortcut for your selected TV. Dismiss hides it until you select a TV or show the shortcut again.")
+                    Text("Show a shortcut for your selected TV. After dismissing it, select a TV or turn this setting off and on to show it again.")
                 }
                 #endif
 

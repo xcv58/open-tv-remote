@@ -80,18 +80,22 @@ struct RemoteActivityWidget: Widget {
         HStack(spacing: 10) {
             if let url = RemoteActivityLink.url(for: context.attributes.sessionID) {
                 Link(destination: url) {
-                    Label("Resume remote", systemImage: "av.remote")
+                    Label("Open", systemImage: "av.remote")
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(.mint, in: Capsule()).foregroundStyle(.black)
                 }
+                .accessibilityLabel("Open remote")
+                .accessibilityHint("Resume your current remote view.")
             }
             if !context.isStale {
                 Button(intent: DisconnectRemoteActivityIntent(sessionID: context.attributes.sessionID)) {
-                    Label("Disconnect", systemImage: "wifi.slash")
+                    Label("Stop", systemImage: "stop.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(.white.opacity(0.14), in: Capsule()).foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Disconnect TV remote")
+                .accessibilityHint("Ends the remote session and keeps the TV paired.")
             }
         }
         .font(.subheadline.weight(.semibold))

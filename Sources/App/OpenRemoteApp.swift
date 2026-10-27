@@ -55,13 +55,6 @@ struct RootView: View {
             .sheet(isPresented: $model.showingSettings, onDismiss: model.presentPendingRemoteShortcut) { SettingsView() }
             .fullScreenCover(isPresented: $model.showingJoystick) { JoystickScreen() }
             .onOpenURL { model.handleRemoteShortcut($0) }
-            .alert("Pinned remote", isPresented: Binding {
-                model.remoteActivity.errorMessage != nil
-            } set: { if !$0 { model.remoteActivity.errorMessage = nil } }) {
-                Button("OK", role: .cancel) { model.remoteActivity.errorMessage = nil }
-            } message: {
-                Text(model.remoteActivity.errorMessage ?? "")
-            }
             #else
             .sheet(isPresented: $model.showingJoystick) { JoystickScreen() }
             #endif

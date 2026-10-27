@@ -235,11 +235,6 @@ final class AppModel: TVDriverDelegate {
     }
 
     #if os(iOS)
-    func pinRemoteActivity() {
-        if isConnectionPaused { reconnect() }
-        if let current { remoteActivity.pin(current) }
-    }
-
     private func handleRemoteActivityAction(_ event: RemoteActivityActionEvent) {
         guard event.deviceID == currentID else { return }
         remoteActivity.reloadOptions()

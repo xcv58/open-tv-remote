@@ -70,10 +70,13 @@ final class RemoteActivityController {
             .flatMap { try? JSONDecoder().decode(RemoteActivitySession.self, from: $0) }
         let known = system.activities
         guard let stored, options.dismissedDeviceID != selectedID, options.disconnectedDeviceID != selectedID,
-              stored.isValid(for: selectedID, at: now()),
-              let match = known.first(where: {
-                  $0.sessionID == stored.id && $0.isActive
-              }) else { unpin(); return }
+              stored.isValid(for: selectedID, at: now()) else { unpin(); return }
+        guard let match = known.first(where: { $0.sessionID == stored.id && $0.isActive }) else {
+            // A dismissal while the process was absent has no onEnded callback.
+            // Keep that choice across relaunch instead of automatically replacing it.
+            dismiss()
+            return
+        }
         session = stored
         activity = match
         lastPublished = stored.lastInteraction
