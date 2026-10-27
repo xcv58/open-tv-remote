@@ -282,13 +282,67 @@ struct JoystickSenderTests {
     @Test func repeatsHaveAnInitialDelayAndAHardLimit() async {
         var keys: [RemoteKey] = []
         var delays: [Duration] = []
-        let sender = JoystickSender(send: { key, _ in keys.append(key) }, sleep: { delays.append($0) })
+        var feedbackKeys: [RemoteKey] = []
+        let sender = JoystickSender(send: { key, request in
+            keys.append(key)
+            if !request.isRepeat { feedbackKeys.append(key) }
+        }, sleep: { delays.append($0) })
         sender.hold(.left)
         await eventually { keys.count == 41 }
         #expect(delays.first == .milliseconds(420))
         #expect(delays.dropFirst().allSatisfy { $0 == .milliseconds(180) })
         try? await Task.sleep(for: .milliseconds(20))
         #expect(keys.count == 41)
+        #expect(feedbackKeys == [.left])
         sender.stop()
+    }
+
+    @Test func directionChangesAndNewContactsRestoreFeedbackAfterRepeating() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send, sleep: { _ in })
+        sender.hold(.right)
+        await eventually { gate.keys.count == 1 }
+        #expect(!gate.requests[0].isRepeat)
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.requests[1].isRepeat)
+
+        sender.hold(.down)
+        gate.complete()
+        await eventually { gate.keys.count == 3 }
+        #expect(gate.keys.last == .down)
+        #expect(!gate.requests[2].isRepeat)
+        gate.complete()
+        await eventually { gate.keys.count == 4 }
+        #expect(gate.requests[3].isRepeat)
+
+        sender.release()
+        sender.hold(.down)
+        gate.complete()
+        await eventually { gate.keys.count == 5 }
+        #expect(gate.keys.last == .down)
+        #expect(!gate.requests[4].isRepeat)
+        sender.stop()
+        gate.complete()
+    }
+
+    @Test func deliberatePressesKeepFeedbackAfterHeldRepeats() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send, sleep: { _ in })
+        sender.hold(.up)
+        await eventually { gate.keys.count == 1 }
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.requests[1].isRepeat)
+
+        for (index, key) in [RemoteKey.select, .back, .home].enumerated() {
+            sender.press(key)
+            gate.complete()
+            await eventually { gate.keys.count == index + 3 }
+            #expect(gate.keys.last == key)
+            #expect(!gate.requests[index + 2].isRepeat)
+        }
+        sender.stop()
+        gate.complete()
     }
 }

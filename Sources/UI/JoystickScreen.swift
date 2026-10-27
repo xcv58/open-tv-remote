@@ -8,7 +8,9 @@ struct JoystickScreen: View {
         JoystickControls(tvName: model.current?.name ?? "No TV selected", enabled: model.state == .connected,
                          sessionID: model.currentID, inputLog: inputLog, close: { dismiss() }) { key, request in
             guard model.state == .connected, !request.isCancelled else { return }
-            if key == .select { Haptics.tick() } else { Haptics.tap() }
+            if !request.isRepeat {
+                if key == .select { Haptics.tick() } else { Haptics.tap() }
+            }
             await model.pressInteractively(key, request: request)
         }
     }

@@ -54,7 +54,11 @@ struct JoystickGesture {
 /// its turn can discard stale input without cancelling a shared WebSocket.
 @MainActor
 final class RemoteInputRequest {
+    /// Held repeats stay silent: transport completion does not confirm TV movement.
+    let isRepeat: Bool
     private(set) var isCancelled = false
+
+    init(isRepeat: Bool = false) { self.isRepeat = isRepeat }
     func cancel() { isCancelled = true }
 }
 
@@ -64,12 +68,16 @@ final class RemoteInputRequest {
 @MainActor
 final class JoystickSender {
     private enum Command {
-        case direction(RemoteKey), press(RemoteKey)
+        case direction(RemoteKey, isRepeat: Bool), press(RemoteKey)
         var key: RemoteKey {
-            switch self { case .direction(let key), .press(let key): return key }
+            switch self { case .direction(let key, _), .press(let key): return key }
         }
         var repeats: Bool {
             if case .direction = self { return true }
+            return false
+        }
+        var isRepeat: Bool {
+            if case .direction(_, let isRepeat) = self { return isRepeat }
             return false
         }
     }
@@ -94,7 +102,7 @@ final class JoystickSender {
         guard direction != held else { return }
         release()
         held = direction
-        if let direction { pending.append(.direction(direction)) }
+        if let direction { pending.append(.direction(direction, isRepeat: false)) }
         start()
     }
 
@@ -130,7 +138,7 @@ final class JoystickSender {
         while !pending.isEmpty {
             let command = pending.removeFirst()
             let token = generation
-            let request = RemoteInputRequest()
+            let request = RemoteInputRequest(isRepeat: command.isRepeat)
             active = (request, command.repeats)
             await send(command.key, request)
             active = nil
@@ -143,7 +151,7 @@ final class JoystickSender {
             pause = nil
             guard token == generation, held == command.key else { continue }
             repeats += 1
-            pending.append(.direction(command.key))
+            pending.append(.direction(command.key, isRepeat: true))
         }
     }
 }
