@@ -44,7 +44,8 @@ private final class FakeRemoteActivitySystem: RemoteActivitySystem {
 @MainActor
 private final class SessionFixture {
     var data: Data?
-    var options = RemoteActivityOptions()
+    var options = RemoteActivityOptions(lastSeenAppVersion: "1.2.0 (11)")
+    var appVersion = "1.2.0 (11)"
     var now = Date(timeIntervalSince1970: 1_000_000)
     let system = FakeRemoteActivitySystem()
     let device = TVDevice(name: "Living Room LG", brand: .lg, host: "192.0.2.10")
@@ -52,7 +53,8 @@ private final class SessionFixture {
     func controller() -> RemoteActivityController {
         RemoteActivityController(system: system, load: { self.data }, save: { self.data = $0 },
                                  loadOptions: { self.options }, saveOptions: { self.options = $0 },
-                                 now: { self.now }, sleep: { _ in throw CancellationError() })
+                                 now: { self.now }, sleep: { _ in throw CancellationError() },
+                                 appVersion: { self.appVersion })
     }
     func restoreFixture() throws -> (RemoteActivitySession, FakeRemoteActivity) {
         let session = RemoteActivitySession(deviceID: device.id, tvName: device.name, now: now)
@@ -73,6 +75,60 @@ private func activityEventually(_ condition: () -> Bool) async {
 @Suite("Pinned remote lifecycle", .serialized)
 @MainActor
 struct RemoteActivityControllerTests {
+    @Test(arguments: [false, true])
+    func updateCanReplaceAMissingCardWithoutInferringDismissal(legacyPreferences: Bool) async throws {
+        let f = SessionFixture()
+        _ = try f.restoreFixture()
+        f.system.handles.removeAll()
+        if legacyPreferences { f.options.lastSeenAppVersion = nil }
+        f.appVersion = "1.2.0 (12)"
+        let controller = f.controller()
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        await activityEventually { controller.session != nil }
+        #expect(f.options.dismissedDeviceID == nil)
+        #expect(f.options.lastSeenAppVersion == f.appVersion)
+        #expect(f.system.requests.count == 1)
+        controller.unpin()
+    }
+
+    @Test(arguments: [false, true])
+    func updatePreservesExplicitDismissalAndStop(disconnected: Bool) async throws {
+        let f = SessionFixture()
+        _ = try f.restoreFixture()
+        f.system.handles.removeAll()
+        f.options.apply(RemoteActivityActionEvent(action: disconnected ? .disconnect : .dismiss, deviceID: f.device.id))
+        f.appVersion = "1.2.0 (12)"
+        let controller = f.controller()
+        controller.reconcile(selectedID: f.device.id)
+        controller.ensureAutomatic(f.device)
+        #expect(controller.session == nil)
+        #expect(f.system.requests.isEmpty)
+        #expect(f.options.dismissedDeviceID == f.device.id)
+        #expect(f.options.disconnectedDeviceID == (disconnected ? f.device.id : nil))
+    }
+
+    @Test func nativeDismissalAfterTheUpdatedAppWasOpenedRemainsHidden() async throws {
+        let f = SessionFixture()
+        let (_, handle) = try f.restoreFixture()
+        f.appVersion = "1.2.0 (12)"
+        do {
+            let updated = f.controller()
+            updated.reconcile(selectedID: f.device.id)
+            await activityEventually { !handle.updates.isEmpty }
+            #expect(updated.session != nil)
+        }
+        // The process is later absent when the card is dismissed.
+        f.system.handles.removeAll()
+        let relaunched = f.controller()
+        relaunched.reconcile(selectedID: f.device.id)
+        relaunched.ensureAutomatic(f.device)
+        await activityEventually { !relaunched.isBusy }
+        #expect(relaunched.session == nil)
+        #expect(f.system.requests.isEmpty)
+        #expect(f.options.dismissedDeviceID == f.device.id)
+    }
+
     @Test func systemDismissalWhileProcessWasAbsentSurvivesRelaunch() async throws {
         let f = SessionFixture()
         _ = try f.restoreFixture()

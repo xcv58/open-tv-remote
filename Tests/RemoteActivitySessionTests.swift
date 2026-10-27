@@ -6,6 +6,15 @@ import Testing
 struct RemoteActivitySessionTests {
     private let start = Date(timeIntervalSince1970: 1_000_000)
 
+    @Test func addingTheVersionMarkerPreservesExistingOptions() throws {
+        let legacy = Data(#"{"automatic":false,"dismissedDeviceID":"saved-tv","disconnectedDeviceID":"paused-tv"}"#.utf8)
+        let decoded = try JSONDecoder().decode(RemoteActivityOptions.self, from: legacy)
+        #expect(!decoded.automatic)
+        #expect(decoded.dismissedDeviceID == "saved-tv")
+        #expect(decoded.disconnectedDeviceID == "paused-tv")
+        #expect(decoded.lastSeenAppVersion == nil)
+    }
+
     @Test func resumeAndExplicitEyesFreeLinksHaveDistinctDestinations() throws {
         let id = UUID()
         let normal = try #require(RemoteActivityLink.url(for: id))

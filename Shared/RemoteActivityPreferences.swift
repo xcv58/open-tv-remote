@@ -4,6 +4,7 @@ struct RemoteActivityOptions: Codable, Equatable {
     var automatic = true
     var dismissedDeviceID: String?
     var disconnectedDeviceID: String?
+    var lastSeenAppVersion: String?
 
     func allowsAutomatic(for id: String) -> Bool {
         automatic && dismissedDeviceID != id && disconnectedDeviceID != id

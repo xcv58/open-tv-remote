@@ -39,6 +39,7 @@ final class RemoteActivityController {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var selectedID: String?
     @ObservationIgnored private var lastPublished = Date.distantPast
+    @ObservationIgnored private var restoringAfterAppUpdate = false
     private static let storageKey = RemoteActivityPersistence.sessionKey
 
     init(system: any RemoteActivitySystem,
@@ -47,7 +48,12 @@ final class RemoteActivityController {
          loadOptions: @escaping () -> RemoteActivityOptions = { RemoteActivityPersistence.options() },
          saveOptions: @escaping (RemoteActivityOptions) -> Void = { RemoteActivityPersistence.save($0) },
          now: @escaping () -> Date = Date.init,
-         sleep: @escaping (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) {
+         sleep: @escaping (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+         appVersion: () -> String? = {
+             guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                   let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String else { return nil }
+             return "\(version) (\(build))"
+         }) {
         self.system = system
         self.load = load ?? { UserDefaults.standard.data(forKey: Self.storageKey) }
         self.save = save ?? { UserDefaults.standard.set($0, forKey: Self.storageKey) }
@@ -56,6 +62,11 @@ final class RemoteActivityController {
         options = loadOptions()
         self.now = now
         self.sleep = sleep
+        if let version = appVersion(), options.lastSeenAppVersion != version {
+            restoringAfterAppUpdate = true
+            options.lastSeenAppVersion = version
+            saveOptions(options)
+        }
     }
 
     /// Restore a known session. Automatic creation happens separately on foreground use.
@@ -65,6 +76,8 @@ final class RemoteActivityController {
             if self.selectedID != selectedID { selectionChanged(to: selectedID) }
             return
         }
+        let canRecoverAfterUpdate = restoringAfterAppUpdate
+        restoringAfterAppUpdate = false
         self.selectedID = selectedID
         let stored = load()
             .flatMap { try? JSONDecoder().decode(RemoteActivitySession.self, from: $0) }
@@ -72,9 +85,10 @@ final class RemoteActivityController {
         guard let stored, options.dismissedDeviceID != selectedID, options.disconnectedDeviceID != selectedID,
               stored.isValid(for: selectedID, at: now()) else { unpin(); return }
         guard let match = known.first(where: { $0.sessionID == stored.id && $0.isActive }) else {
-            // A dismissal while the process was absent has no onEnded callback.
-            // Keep that choice across relaunch instead of automatically replacing it.
-            dismiss()
+            // Installation can remove the old card. Only infer dismissal when the
+            // app version is unchanged; explicit persisted dismissals remain above.
+            if canRecoverAfterUpdate { unpin() }
+            else { dismiss() }
             return
         }
         session = stored
