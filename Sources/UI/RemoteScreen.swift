@@ -3,6 +3,7 @@ import SwiftUI
 struct RemoteScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("padMode") private var mode: PadMode = .dpad
+    @State private var showingJoystick = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -43,14 +44,24 @@ struct RemoteScreen: View {
         .focusEffectDisabled()
         .focused($focused)
         .onKeyPress(action: handleKey)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            #if DEBUG
+            if DemoMode.isEnabled && UserDefaults.standard.bool(forKey: "demoEyesFree") { showingJoystick = true }
+            #endif
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showingJoystick) { JoystickScreen() }
+        #else
+        .sheet(isPresented: $showingJoystick) { JoystickScreen() }
+        #endif
     }
 
     private var navRow: some View {
         HStack(spacing: 12) {
             RemoteKeyButton(key: .back, symbol: "arrow.uturn.backward")
                 .frame(width: 58)
-            ModePicker(mode: $mode)
+            ModePicker(mode: $mode) { showingJoystick = true }
             RemoteKeyButton(key: .home, symbol: "house.fill")
                 .frame(width: 58)
         }
@@ -269,6 +280,7 @@ private struct StatusBanner: View {
 
 private struct ModePicker: View {
     @Binding var mode: PadMode
+    var openJoystick: () -> Void
     @Namespace private var ns
 
     var body: some View {
@@ -293,6 +305,19 @@ private struct ModePicker: View {
                 .accessibilityLabel(m.title)
                 .accessibilityAddTraits(mode == m ? .isSelected : [])
             }
+            Button {
+                Haptics.tap()
+                openJoystick()
+            } label: {
+                Image(systemName: "l.joystick.tilt.up.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Eyes-free mode")
+            .accessibilityIdentifier("openEyesFree")
         }
         .padding(5)
         .background(Capsule().fill(Theme.well))

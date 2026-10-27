@@ -1,0 +1,294 @@
+import Foundation
+import CoreGraphics
+import Testing
+@testable import JoystickCore
+
+@Suite("Eyes-free gesture")
+struct JoystickGestureTests {
+    @Test func aBriefTapSelectsAndResets() {
+        var input = JoystickGesture()
+        input.update(start: CGPoint(x: 280, y: 500), location: CGPoint(x: 282, y: 503), time: 10)
+        #expect(input.direction == nil)
+        let selected = input.finish(time: 10.15)
+        #expect(selected)
+        #expect(input.origin == nil)
+    }
+
+    @Test func restingDoesNotSelect() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: .zero, time: 0)
+        let selected = input.finish(time: 0.6)
+        #expect(!selected)
+    }
+
+    @Test func aDragReturningToCenterNeverSelects() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: CGPoint(x: 45, y: 0), time: 0)
+        #expect(input.direction == .right)
+        input.update(start: .zero, location: .zero, time: 0.1)
+        #expect(input.direction == nil)
+        let selected = input.finish(time: 0.2)
+        #expect(!selected)
+    }
+
+    @Test func everyContactReanchorsAllFourDirections() {
+        for origin in [CGPoint(x: 40, y: 70), CGPoint(x: 280, y: 500)] {
+            for (offset, key) in [(CGPoint(x: 40, y: 0), RemoteKey.right),
+                                  (CGPoint(x: -40, y: 0), .left),
+                                  (CGPoint(x: 0, y: -40), .up),
+                                  (CGPoint(x: 0, y: 40), .down)] {
+                var input = JoystickGesture()
+                input.update(start: origin, location: CGPoint(x: origin.x + offset.x, y: origin.y + offset.y), time: 0)
+                #expect(input.direction == key)
+                let selected = input.finish(time: 0.1)
+                #expect(!selected)
+            }
+        }
+    }
+
+    @Test func neutralZoneHasHysteresis() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: CGPoint(x: 20, y: 0), time: 0)
+        #expect(input.direction == nil)
+        input.update(start: .zero, location: CGPoint(x: 30, y: 0), time: 0.1)
+        #expect(input.direction == .right)
+        input.update(start: .zero, location: CGPoint(x: 20, y: 0), time: 0.2)
+        #expect(input.direction == .right)
+        input.update(start: .zero, location: CGPoint(x: 10, y: 0), time: 0.3)
+        #expect(input.direction == nil)
+    }
+
+    @Test func diagonalJitterDoesNotChangeAxis() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: CGPoint(x: 40, y: 20), time: 0)
+        input.update(start: .zero, location: CGPoint(x: 40, y: 45), time: 0.1)
+        #expect(input.direction == .right)
+        input.update(start: .zero, location: CGPoint(x: 25, y: 50), time: 0.2)
+        #expect(input.direction == .down)
+    }
+
+    @Test func cancellationCannotBecomeSelection() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: .zero, time: 0)
+        input.cancel()
+        let selected = input.finish(location: .zero, time: 0.1)
+        #expect(!selected)
+    }
+
+    @Test func finalReleaseMovementCannotBecomeATap() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: .zero, time: 0)
+        let selected = input.finish(location: CGPoint(x: 40, y: 0), time: 0.1)
+        #expect(!selected)
+    }
+
+    @Test func movementWithinNeutralZoneStillSuppressesAccidentalSelection() {
+        var input = JoystickGesture()
+        input.update(start: .zero, location: CGPoint(x: 18, y: 0), time: 0)
+        #expect(input.direction == nil)
+        let selected = input.finish(time: 0.1)
+        #expect(!selected)
+    }
+}
+
+@MainActor
+private final class TransportGate {
+    var keys: [RemoteKey] = []
+    var requests: [RemoteInputRequest] = []
+    var completions: [CheckedContinuation<Void, Never>] = []
+    func send(_ key: RemoteKey, request: RemoteInputRequest) async {
+        keys.append(key)
+        requests.append(request)
+        await withCheckedContinuation { completions.append($0) }
+    }
+    func complete() {
+        if !completions.isEmpty { completions.removeFirst().resume() }
+    }
+}
+
+@MainActor
+private func eventually(_ condition: () -> Bool) async {
+    let deadline = ContinuousClock.now + .seconds(2)
+    while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+    #expect(condition())
+}
+
+@Suite("Eyes-free sending", .serialized)
+@MainActor
+struct JoystickSenderTests {
+    @Test func liftingDuringSlowTransportDiscardsAllRepeats() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.right)
+        await eventually { gate.keys.count == 1 }
+        sender.stop()
+        gate.complete()
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(gate.keys == [.right])
+    }
+
+    @Test func onlyLatestDirectionSurvivesSlowTransport() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.up)
+        await eventually { gate.keys.count == 1 }
+        sender.hold(.right)
+        sender.hold(.left)
+        #expect(gate.keys == [.up])
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.up, .left])
+        sender.stop()
+        gate.complete()
+    }
+
+    @Test func backReplacesQueuedMovementWithoutRepeating() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.right)
+        await eventually { gate.keys.count == 1 }
+        sender.hold(.down)
+        sender.press(.back)
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.right, .back])
+        gate.complete()
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(gate.keys.count == 2)
+    }
+
+    @Test func nextContactKeepsAcceptedBackAheadOfMovement() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.down)
+        await eventually { gate.keys.count == 1 }
+        sender.press(.back)
+        sender.release()
+        sender.hold(.right)
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.down, .back])
+        gate.complete()
+        await eventually { gate.keys.count == 3 }
+        #expect(gate.keys == [.down, .back, .right])
+        sender.release()
+        gate.complete()
+        sender.stop()
+    }
+
+    @Test func deliberatePressesKeepTheirOrderBehindSlowMovement() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.down)
+        await eventually { gate.keys.count == 1 }
+        sender.press(.back)
+        sender.release()
+        sender.press(.home)
+        sender.release()
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.down, .back])
+        gate.complete()
+        await eventually { gate.keys.count == 3 }
+        #expect(gate.keys == [.down, .back, .home])
+        gate.complete()
+        sender.stop()
+    }
+
+    @Test func selectionIsAlwaysOneCommand() async {
+        var keys: [RemoteKey] = []
+        let sender = JoystickSender(send: { key, _ in keys.append(key) }, sleep: { _ in })
+        sender.press(.select)
+        await eventually { keys.count == 1 }
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(keys == [.select])
+    }
+
+    @Test func stopDuringRepeatDelayDoesNotSendAgain() async {
+        var keys: [RemoteKey] = []
+        let sender = JoystickSender(send: { key, _ in keys.append(key) })
+        sender.hold(.down)
+        await eventually { keys.count == 1 }
+        sender.stop()
+        try? await Task.sleep(for: .milliseconds(460))
+        #expect(keys == [.down])
+    }
+
+    @Test func liftPreservesOKBehindSlowMovement() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.right)
+        await eventually { gate.keys.count == 1 }
+        sender.release()
+        #expect(gate.requests[0].isCancelled)
+        sender.press(.select)
+        sender.release() // GestureState resets after onEnded queued OK.
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.right, .select])
+        #expect(!gate.requests[1].isCancelled)
+        gate.complete()
+        sender.stop()
+    }
+
+    @Test func liftPreservesBackPressedWhileThumbWasDown() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.right)
+        await eventually { gate.keys.count == 1 }
+        sender.press(.back)
+        sender.release()
+        sender.release() // Both onEnded and the touch-reset observer can run.
+        gate.complete()
+        await eventually { gate.keys.count == 2 }
+        #expect(gate.keys == [.right, .back])
+        #expect(!gate.requests[1].isCancelled)
+        gate.complete()
+        sender.stop()
+    }
+
+    @Test func immediateTapSurvivesTouchResetBeforeWorkerStarts() async {
+        var keys: [RemoteKey] = []
+        let sender = JoystickSender(send: { key, _ in keys.append(key) })
+        sender.press(.select)
+        sender.release()
+        await eventually { keys.count == 1 }
+        #expect(keys == [.select])
+        sender.stop()
+    }
+
+    @Test func lifecycleCancellationStillDropsPendingOK() async {
+        let gate = TransportGate()
+        let sender = JoystickSender(send: gate.send)
+        sender.hold(.up)
+        await eventually { gate.keys.count == 1 }
+        sender.press(.select)
+        sender.press(.back)
+        sender.stop() // Dismissal/background/session change invalidates every queued press.
+        gate.complete()
+        try? await Task.sleep(for: .milliseconds(25))
+        #expect(gate.keys == [.up])
+    }
+
+    @Test func liftingBeforeDispatchDropsMovement() async {
+        var keys: [RemoteKey] = []
+        let sender = JoystickSender(send: { key, _ in keys.append(key) })
+        sender.hold(.down)
+        sender.release()
+        try? await Task.sleep(for: .milliseconds(25))
+        #expect(keys.isEmpty)
+    }
+
+    @Test func repeatsHaveAnInitialDelayAndAHardLimit() async {
+        var keys: [RemoteKey] = []
+        var delays: [Duration] = []
+        let sender = JoystickSender(send: { key, _ in keys.append(key) }, sleep: { delays.append($0) })
+        sender.hold(.left)
+        await eventually { keys.count == 41 }
+        #expect(delays.first == .milliseconds(420))
+        #expect(delays.dropFirst().allSatisfy { $0 == .milliseconds(180) })
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(keys.count == 41)
+        sender.stop()
+    }
+}
