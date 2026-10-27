@@ -151,7 +151,7 @@ final class JoystickSender {
             let feedback: RemoteInputRequest.Feedback
             if !command.isRepeat {
                 feedback = .firm
-            } else if let lastFeedback, time - lastFeedback >= 0.7 {
+            } else if let lastFeedback, time - lastFeedback >= 0.5 {
                 feedback = .soft
             } else {
                 feedback = .none
