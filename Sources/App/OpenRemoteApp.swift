@@ -48,11 +48,15 @@ struct RootView: View {
             #if os(macOS)
             .frame(minWidth: 380, minHeight: 760)
             #endif
-            .sheet(isPresented: $model.showingDevices) { DevicesSheet() }
-            .sheet(isPresented: $model.showingKeyboard) { KeyboardSheet() }
-            .sheet(isPresented: $model.showingApps) { AppsSheet() }
+            .sheet(isPresented: $model.showingDevices, onDismiss: model.presentPendingRemoteShortcut) { DevicesSheet() }
+            .sheet(isPresented: $model.showingKeyboard, onDismiss: model.presentPendingRemoteShortcut) { KeyboardSheet() }
+            .sheet(isPresented: $model.showingApps, onDismiss: model.presentPendingRemoteShortcut) { AppsSheet() }
             #if os(iOS)
-            .sheet(isPresented: $model.showingSettings) { SettingsView() }
+            .sheet(isPresented: $model.showingSettings, onDismiss: model.presentPendingRemoteShortcut) { SettingsView() }
+            .fullScreenCover(isPresented: $model.showingJoystick) { JoystickScreen() }
+            .onOpenURL { model.handleRemoteShortcut($0) }
+            #else
+            .sheet(isPresented: $model.showingJoystick) { JoystickScreen() }
             #endif
             .sheet(isPresented: pairingPresented) { PairingSheet() }
             .animation(.snappy, value: model.state)
@@ -64,6 +68,7 @@ struct RootView: View {
                 }
             }
             .task {
+                if scenePhase == .active { model.sceneDidBecomeActive() }
                 if model.devices.isEmpty { model.showingDevices = true }
             }
     }
@@ -104,6 +109,7 @@ private struct Pager: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .onAppear { page = stored }
+        .onChange(of: stored) { _, new in if page != new { page = new } }
         .onChange(of: page) { _, new in if let new { stored = new } }
     }
 }

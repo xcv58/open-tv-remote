@@ -12,6 +12,7 @@ final class RokuDriver: TVDriver {
     private var base: URL { URL(string: "http://\(device.host):8060")! }
     /// Keypresses must arrive in order, so they go through one serial chain.
     private var queue: Task<Void, Never>?
+    private var generation = 0
 
     init(device: TVDevice) {
         self.device = device
@@ -19,8 +20,11 @@ final class RokuDriver: TVDriver {
 
     func connect() {
         state = .connecting
+        let token = generation
         Task {
-            guard let data = await LocalHTTP.get(base.appending(path: "query/device-info"), timeout: 4) else {
+            let data = await LocalHTTP.get(base.appending(path: "query/device-info"), timeout: 4)
+            guard token == generation else { return }
+            guard let data else {
                 state = .failed("Couldn't reach the Roku. Is it on and on the same Wi-Fi?")
                 return
             }
@@ -38,6 +42,7 @@ final class RokuDriver: TVDriver {
     func submitPairingCode(_ code: String) {}
 
     func disconnect() {
+        generation += 1
         queue?.cancel()
         state = .idle
     }
@@ -81,16 +86,17 @@ final class RokuDriver: TVDriver {
     @discardableResult
     private func enqueue(_ path: String, request: RemoteInputRequest? = nil) -> Task<Void, Never> {
         let previous = queue
+        let token = generation
         // Percent-encoded paths must not be re-encoded by appending(path:).
         let url = URL(string: base.absoluteString + "/" + path)!
         let operation = Task { @MainActor [weak self] in
             await previous?.value
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, token == self.generation else { return }
             if let request {
                 guard !request.isCancelled, self.state == .connected else { return }
             }
             let status = await LocalHTTP.post(url, timeout: request == nil ? 3 : 2)
-            guard !Task.isCancelled, request?.isCancelled != true else { return }
+            guard !Task.isCancelled, request?.isCancelled != true, token == self.generation else { return }
             switch status {
             case 200?, 202?, 204?:
                 if self.state != .connected { self.state = .connected }

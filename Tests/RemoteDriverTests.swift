@@ -12,6 +12,20 @@ private func waitUntil(_ condition: () -> Bool) async {
 @Suite("Interactive transport ordering and recovery", .serialized)
 @MainActor
 struct RemoteDriverTests {
+    @Test func rokuDisconnectInvalidatesEveryQueuedNormalCommandAndOldResponse() async {
+        let driver = await connectedRoku()
+        driver.send(.up)
+        await waitUntil { LocalHTTP.started.count == 1 }
+        driver.send(.down)
+        driver.send(.left)
+        driver.disconnect()
+        LocalHTTP.complete("/keypress/Up")
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(LocalHTTP.started == ["/keypress/Up"])
+        #expect(driver.state == .idle)
+        LocalHTTP.reset()
+    }
+
     private func connectedRoku() async -> RokuDriver {
         LocalHTTP.reset()
         let driver = RokuDriver(device: TVDevice(name: "Test Roku", brand: .roku, host: "192.0.2.10"))

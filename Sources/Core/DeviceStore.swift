@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 enum DeviceStore {
     private static let devicesKey = "devices.v1"
-    private static let currentKey = "currentDevice.v1"
+    private static let currentKey = RemoteActivityPersistence.selectedDeviceKey
 
     static func load() -> [TVDevice] {
         guard let data = UserDefaults.standard.data(forKey: devicesKey),

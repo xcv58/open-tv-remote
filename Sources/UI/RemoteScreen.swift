@@ -3,7 +3,6 @@ import SwiftUI
 struct RemoteScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("padMode") private var mode: PadMode = .dpad
-    @State private var showingJoystick = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -47,21 +46,16 @@ struct RemoteScreen: View {
         .onAppear {
             focused = true
             #if DEBUG
-            if DemoMode.isEnabled && UserDefaults.standard.bool(forKey: "demoEyesFree") { showingJoystick = true }
+            if DemoMode.isEnabled && UserDefaults.standard.bool(forKey: "demoEyesFree") { model.showingJoystick = true }
             #endif
         }
-        #if os(iOS)
-        .fullScreenCover(isPresented: $showingJoystick) { JoystickScreen() }
-        #else
-        .sheet(isPresented: $showingJoystick) { JoystickScreen() }
-        #endif
     }
 
     private var navRow: some View {
         HStack(spacing: 12) {
             RemoteKeyButton(key: .back, symbol: "arrow.uturn.backward")
                 .frame(width: 58)
-            ModePicker(mode: $mode) { showingJoystick = true }
+            ModePicker(mode: $mode) { model.showingJoystick = true }
             RemoteKeyButton(key: .home, symbol: "house.fill")
                 .frame(width: 58)
         }
@@ -208,7 +202,7 @@ private struct StatusLine: View {
         case .pairing: ("Pairing…", .yellow)
         case .unpaired: ("Not paired yet", .orange)
         case .failed: ("Not connected", Theme.power)
-        case .idle: (model.current == nil ? "No TV selected" : "Ready", Theme.secondary)
+        case .idle: (model.current == nil ? "No TV selected" : (model.isConnectionPaused ? "Disconnected" : "Ready"), Theme.secondary)
         }
         HStack(spacing: 5) {
             Circle().fill(color).frame(width: 6, height: 6)
@@ -229,6 +223,10 @@ private struct StatusBanner: View {
                  action: "Find TVs") { model.showingDevices = true }
         } else if let device = model.current {
             switch model.state {
+            case .idle where model.isConnectionPaused:
+                card(symbol: "wifi.slash", title: "Disconnected from \(device.name)",
+                     message: "Your pairing is saved. Connect when you’re ready to use the remote.",
+                     action: "Connect") { model.reconnect() }
             case .unpaired:
                 card(symbol: "link", title: "Pair with \(device.name)",
                      message: device.brand.pairingExplanation, action: "Pair") { model.startPairing() }
