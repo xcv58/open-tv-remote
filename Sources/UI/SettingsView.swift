@@ -13,6 +13,14 @@ struct SettingsView: View {
         return text
     }
 
+    private var privacyPolicy: String {
+        guard let url = Bundle.main.url(forResource: "RemoteLab-Privacy", withExtension: "txt"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return "The privacy policy is unavailable. Please contact the developer through TestFlight feedback."
+        }
+        return text
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -85,6 +93,17 @@ struct SettingsView: View {
                             .font(.footnote.weight(.semibold))
                         Link("Original project by Nathan Butler", destination: URL(string: "https://github.com/iamnbutler/open-tv-remote")!)
                             .font(.footnote)
+                        NavigationLink("Privacy policy") {
+                            ScrollView {
+                                Text(privacyPolicy)
+                                    .font(.body)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding()
+                            }
+                            .navigationTitle("Privacy")
+                        }
+                        .font(.footnote)
                         NavigationLink("Open-source license") {
                             ScrollView {
                                 Text(openSourceLicense)

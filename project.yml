@@ -7,8 +7,8 @@ settings:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: 5736QK4NZX
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.0.1"
+    CURRENT_PROJECT_VERSION: "2"
     REMOTE_URL_SCHEME: remotelab
     REMOTE_ACTIVITY_BUNDLE_IDENTIFIER: media.jenny.remotelab.remoteactivity
 targets:
