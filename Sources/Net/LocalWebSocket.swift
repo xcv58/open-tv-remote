@@ -34,8 +34,15 @@ final class LocalWebSocket {
     }
 
     func sendAndWait(_ text: String) async {
-        guard isReady, !closed, !Task.isCancelled else { return }
-        try? await task.send(.string(text))
+        _ = await sendReportingResult(text)
+    }
+
+    func sendReportingResult(_ text: String) async -> Bool {
+        guard isReady, !closed, !Task.isCancelled else { return false }
+        do {
+            try await task.send(.string(text))
+            return !closed
+        } catch { return false }
     }
 
     func sendAndWait(json: [String: Any]) async {

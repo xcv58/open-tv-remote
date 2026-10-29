@@ -159,6 +159,79 @@ struct RemoteDriverTests {
         control.onText?("{\"id\":\"\(id)\",\"payload\":{\"socketPath\":\"ws://192.0.2.20/pointer\"}}")
     }
 
+    @Test func lgCursorUsesPointerPacketsRatherThanDirectionalKeys() async {
+        let (driver, _, pointer) = connectLG()
+        #expect(driver.supportsCursor)
+        #expect(await driver.sendCursor(.move(dx: 12.5, dy: -3), request: RemoteInputRequest()))
+        #expect(await driver.sendCursor(.scroll(dx: 0, dy: 1), request: RemoteInputRequest()))
+        #expect(await driver.sendCursor(.click, request: RemoteInputRequest()))
+        #expect(pointer.sent == ["type:move\ndx:12.500\ndy:-3.000\ndown:0\n\n",
+                                 "type:scroll\ndx:0.000\ndy:1.000\n\n", "type:click\n\n"])
+        driver.disconnect()
+    }
+
+    @Test func lgCursorRejectsInvalidAndCancelledInput() async {
+        let (driver, _, pointer) = connectLG()
+        let cancelled = RemoteInputRequest()
+        cancelled.cancel()
+        #expect(!(await driver.sendCursor(.click, request: cancelled)))
+        #expect(!(await driver.sendCursor(.move(dx: .nan, dy: 1), request: RemoteInputRequest())))
+        #expect(!(await driver.sendCursor(.scroll(dx: 0, dy: .infinity), request: RemoteInputRequest())))
+        #expect(pointer.sent.isEmpty)
+        driver.disconnect()
+    }
+
+    @Test func lgCursorRecoveryDropsTheDragAndPreservesCredentials() async {
+        let (driver, control, pointer) = connectLG()
+        pointer.peerClosed()
+        #expect(!(await driver.sendCursor(.move(dx: 50, dy: 0), request: RemoteInputRequest())))
+        respondToPointerRequest(control)
+        let replacement = LocalWebSocket.instances.last!
+        #expect(replacement !== pointer)
+        #expect(replacement.sent.isEmpty)
+        #expect(driver.device.token == "test")
+        #expect(await driver.sendCursor(.move(dx: 3, dy: 2), request: RemoteInputRequest()))
+        #expect(replacement.sent == ["type:move\ndx:3.000\ndy:2.000\ndown:0\n\n"])
+        driver.disconnect()
+    }
+
+    @Test func lgCursorSendFailureDropsOnlyThePointerAndRecoversOnNewInput() async {
+        let (driver, control, pointer) = connectLG()
+        pointer.sendSucceeds = false
+        #expect(!(await driver.sendCursor(.click, request: RemoteInputRequest())))
+        #expect(driver.state == .connected)
+        #expect(driver.device.token == "test")
+        #expect(!(await driver.sendCursor(.move(dx: 50, dy: 0), request: RemoteInputRequest())))
+        respondToPointerRequest(control)
+        let replacement = LocalWebSocket.instances.last!
+        #expect(replacement !== pointer)
+        #expect(replacement.sent.isEmpty)
+        #expect(await driver.sendCursor(.click, request: RemoteInputRequest()))
+        #expect(replacement.sent == ["type:click\n\n"])
+        driver.disconnect()
+    }
+
+    @Test func lgCursorDoesNotPairOrReconnectWhenDisconnected() async {
+        LocalWebSocket.instances = []
+        let driver = LGDriver(device: TVDevice(name: "Test LG", brand: .lg, host: "192.0.2.20", token: "test"))
+        #expect(!(await driver.sendCursor(.click, request: RemoteInputRequest())))
+        #expect(LocalWebSocket.instances.isEmpty)
+    }
+
+    @Test func lgCursorWaitingForHandshakeIsCancelledByAChangedSession() async {
+        LocalWebSocket.delayedOpenPaths = ["/pointer"]
+        defer { LocalWebSocket.delayedOpenPaths = [] }
+        let (driver, _, pointer) = connectLG()
+        let request = RemoteInputRequest()
+        let click = Task { await driver.sendCursor(.click, request: request) }
+        try? await Task.sleep(for: .milliseconds(30))
+        request.cancel()
+        driver.disconnect()
+        pointer.completeHandshake()
+        #expect(!(await click.value))
+        #expect(pointer.sent.isEmpty)
+    }
+
     @Test func lgRecoversInputSocketWithoutReplayingTheTriggeringKey() async {
         let (driver, control, pointer) = connectLG()
         await driver.sendInteractive(.right, request: RemoteInputRequest())

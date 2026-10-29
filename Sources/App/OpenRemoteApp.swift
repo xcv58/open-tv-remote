@@ -53,10 +53,20 @@ struct RootView: View {
             .sheet(isPresented: $model.showingApps, onDismiss: model.presentPendingRemoteShortcut) { AppsSheet() }
             #if os(iOS)
             .sheet(isPresented: $model.showingSettings, onDismiss: model.presentPendingRemoteShortcut) { SettingsView() }
-            .fullScreenCover(isPresented: $model.showingJoystick) { JoystickScreen() }
+            .fullScreenCover(item: $model.remoteControlMode) { mode in
+                switch mode {
+                case .eyesFree: JoystickScreen()
+                case .cursor: CursorScreen()
+                }
+            }
             .onOpenURL { model.handleRemoteShortcut($0) }
             #else
-            .sheet(isPresented: $model.showingJoystick) { JoystickScreen() }
+            .sheet(item: $model.remoteControlMode) { mode in
+                switch mode {
+                case .eyesFree: JoystickScreen()
+                case .cursor: CursorScreen()
+                }
+            }
             #endif
             .sheet(isPresented: pairingPresented) { PairingSheet() }
             .animation(.snappy, value: model.state)

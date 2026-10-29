@@ -10,6 +10,7 @@ final class LocalWebSocket {
     var onText: ((String) -> Void)?
     var onClose: ((Error?) -> Void)?
     private(set) var isReady = false
+    var sendSucceeds = true
     private(set) var sent: [String] = []
 
     init(url: URL) { self.url = url; Self.instances.append(self) }
@@ -24,6 +25,11 @@ final class LocalWebSocket {
     }
     func sendAndWait(_ text: String) async {
         if isReady { sent.append(text) }
+    }
+    func sendReportingResult(_ text: String) async -> Bool {
+        guard isReady, sendSucceeds else { return false }
+        sent.append(text)
+        return true
     }
     func close() { isReady = false; onClose = nil }
     func peerClosed() { isReady = false; onClose?(nil) }

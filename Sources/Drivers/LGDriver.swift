@@ -231,6 +231,44 @@ final class LGDriver: TVDriver {
         }
     }
 
+    var supportsCursor: Bool { true }
+
+    func sendCursor(_ command: CursorCommand, request input: RemoteInputRequest) async -> Bool {
+        guard state == .connected, !input.isCancelled, !Task.isCancelled,
+              let command = command.bounded, let control = socket else { return false }
+        if pointer?.isReady != true {
+            if pointer == nil { openPointerSocket() }
+            // Never replay a drag after recovering a socket. A new gesture can try again.
+            guard !command.isContinuous else { return false }
+            let deadline = ContinuousClock.now + .seconds(4)
+            while pointer?.isReady != true {
+                guard state == .connected, socket === control, !input.isCancelled,
+                      !Task.isCancelled, ContinuousClock.now < deadline else { return false }
+                do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
+            }
+        }
+        guard state == .connected, socket === control, !input.isCancelled,
+              !Task.isCancelled, let pointer, pointer.isReady else { return false }
+        let packet: String
+        switch command {
+        case .move(let dx, let dy):
+            packet = "type:move\ndx:\(Self.coordinate(dx))\ndy:\(Self.coordinate(dy))\ndown:0\n\n"
+        case .scroll(let dx, let dy):
+            packet = "type:scroll\ndx:\(Self.coordinate(dx))\ndy:\(Self.coordinate(dy))\n\n"
+        case .click: packet = "type:click\n\n"
+        case .back: packet = "type:button\nname:BACK\n\n"
+        case .home: packet = "type:button\nname:HOME\n\n"
+        }
+        let sent = await pointer.sendReportingResult(packet)
+        guard socket === control, self.pointer === pointer, state == .connected else { return false }
+        if !sent { pointer.close(); self.pointer = nil }
+        return sent && !input.isCancelled
+    }
+
+    private static func coordinate(_ value: Double) -> String {
+        String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
     private func button(_ name: String) {
         if let pointer {
             pointer.send("type:button\nname:\(name)\n\n")

@@ -11,7 +11,8 @@ struct RemoteScreen: View {
             // phone — a scroll that starts on a key would otherwise press it.
             let compact = geo.size.height < 760
             let spacing: CGFloat = compact ? 10 : 18
-            let fixed: CGFloat = 48 + 54 + 192 + spacing * 4 + 28 + PageSwitcher.height
+            let cursorHeight: CGFloat = model.supportsCursor ? 44 + spacing : 0
+            let fixed: CGFloat = 48 + 54 + 192 + spacing * 4 + 28 + PageSwitcher.height + cursorHeight
             // The keyboard has too many keys to share the screen, so it takes the controls' space too.
             let padHeight = mode == .keyboard
                 ? max(300, geo.size.height - (fixed - 192 - spacing) - 8)
@@ -21,6 +22,19 @@ struct RemoteScreen: View {
                     TopBar()
                     StatusBanner()
                     navRow
+                    if model.supportsCursor {
+                        Button {
+                            Haptics.tap()
+                            model.remoteControlMode = .cursor
+                        } label: {
+                            Label("LG Cursor", systemImage: "cursorarrow")
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(Capsule().fill(Theme.well))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("openLGCursor")
+                    }
                     pad
                         .frame(height: padHeight)
                         .overlay(alignment: .bottomTrailing) {
