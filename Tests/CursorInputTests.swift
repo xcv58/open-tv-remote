@@ -170,6 +170,83 @@ struct CursorInputTests {
         #expect(CursorMotion.scroll(dx: .infinity, dy: 0, reversed: false) == nil)
     }
 
+    @Test func scrollStepsPreserveSlowDragsAndCancelOppositeJitter() {
+        var scroll = CursorScrollAccumulator()
+        for _ in 0..<100 {
+            #expect(scroll.append(dx: 0.00001, dy: -0.00001) == nil)
+            #expect(scroll.append(dx: -0.00001, dy: 0.00001) == nil)
+        }
+        #expect(scroll.append(dx: 0.25, dy: -0.5) == nil)
+        #expect(scroll.append(dx: 0.25, dy: -0.5) == .scroll(dx: 0, dy: -1))
+        #expect(scroll.append(dx: 0.75, dy: 0) == .scroll(dx: 1, dy: 0))
+        #expect(scroll.append(dx: .nan, dy: 1) == nil)
+        #expect(scroll.append(dx: 0.75, dy: 0) == .scroll(dx: 1, dy: 0))
+        scroll.reset()
+        #expect(scroll.append(dx: 0, dy: 0.5) == nil)
+    }
+
+    @Test func tinyScrollJitterHasNoPacketsHapticsOrActivity() async {
+        var feedback: [RemoteInputRequest.Feedback] = []
+        let sender = CursorSender(send: { _, request in feedback.append(request.feedback); return true })
+        for _ in 0..<100 {
+            sender.scroll(dx: 0, dy: 0.00001)
+            sender.scroll(dx: 0, dy: -0.00001)
+        }
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(feedback.isEmpty)
+        #expect(sender.scrollActivity == 0)
+        sender.stop()
+    }
+
+    @Test func aStationaryScrollHoldDoesNotRepeatFeedbackOrActivity() async {
+        var sent: [CursorCommand] = []
+        var feedback: [RemoteInputRequest.Feedback] = []
+        let sender = CursorSender(send: { command, request in
+            sent.append(command)
+            feedback.append(request.feedback)
+            return true
+        })
+        sender.scroll(dx: 0, dy: 0.5)
+        sender.scroll(dx: 0, dy: 0.75)
+        await waitUntil { sender.scrollActivity == 1 }
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(sent == [.scroll(dx: 0, dy: 1)])
+        #expect(feedback == [.firm])
+        #expect(sender.scrollActivity == 1)
+        sender.stop()
+    }
+
+    @Test func liftDropsPartialScrollStepsBetweenContacts() async {
+        var sent: [CursorCommand] = []
+        let sender = CursorSender(send: { command, _ in sent.append(command); return true })
+        sender.scroll(dx: 0, dy: 0.75)
+        sender.release()
+        sender.scroll(dx: 0, dy: 0.5)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(sent.isEmpty)
+        sender.scroll(dx: 0, dy: 0.5)
+        await waitUntil { sender.scrollActivity == 1 }
+        #expect(sent == [.scroll(dx: 0, dy: 1)])
+        sender.stop()
+    }
+
+    @Test func failedScrollDropsPartialStepsAndDoesNotReportActivity() async {
+        var ready = false
+        var sent: [CursorCommand] = []
+        let sender = CursorSender(send: { command, _ in sent.append(command); return ready })
+        sender.scroll(dx: 0, dy: 1.75)
+        await waitUntil { sender.unavailable }
+        #expect(sender.scrollActivity == 0)
+        ready = true
+        sender.scroll(dx: 0, dy: 0.25)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(sent.count == 1)
+        sender.scroll(dx: 0, dy: 0.75)
+        await waitUntil { sender.scrollActivity == 1 }
+        #expect(sent == [.scroll(dx: 0, dy: 1), .scroll(dx: 0, dy: 1)])
+        sender.stop()
+    }
+
     @Test func pointerMovementIsAlwaysSilent() {
         var policy = CursorFeedbackPolicy()
         #expect(policy.next(.move(dx: 1, dy: 0), time: 0) == .none)
@@ -322,11 +399,19 @@ struct CursorInputTests {
 
     @Test func invalidSavedSpeedsAndSliderValuesAreClamped() {
         let sender = CursorSender(send: { _, _ in true }, speed: .nan)
-        #expect(sender.speed == 32)
+        #expect(sender.speed == 12)
         sender.setSpeed(-100)
         #expect(sender.speed == 4)
         sender.setSpeed(1000)
         #expect(sender.speed == 96)
         sender.stop()
+    }
+
+    @Test func speedDefaultsToTwelveAndPreservesAnExplicitSavedChoice() {
+        let defaults = CursorSender(send: { _, _ in true })
+        let saved = CursorSender(send: { _, _ in true }, speed: 16)
+        #expect(defaults.speed == 12)
+        #expect(saved.speed == 16)
+        defaults.stop(); saved.stop()
     }
 }

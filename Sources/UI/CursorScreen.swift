@@ -61,6 +61,7 @@ private struct CursorControls: View {
             HStack(spacing: 12) {
                 touchpad
                 CursorScrollStrip(enabled: enabled && scenePhase == .active,
+                                  activity: sender.scrollActivity,
                                   scroll: { scroll(0, $0) }, release: { sender.release() })
                     .frame(width: 56)
                     .id(sessionID)
@@ -194,17 +195,19 @@ private struct CursorControls: View {
 
 private struct CursorScrollStrip: View {
     let enabled: Bool
+    let activity: Int
     let scroll: (Double) -> Void
     let release: () -> Void
     @State private var previous: CGFloat?
     @State private var ignoreUntilLift = false
+    @State private var highlighting = false
     @GestureState private var touching = false
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "chevron.up")
             Spacer(minLength: 0)
-            Capsule().fill(Theme.accent.opacity(touching && enabled ? 0.9 : 0.35))
+            Capsule().fill(Theme.accent.opacity(highlighting && enabled ? 0.9 : 0.35))
                 .frame(width: 8, height: 50)
             Text("Scroll").font(.system(size: 11, weight: .semibold))
             Spacer(minLength: 0)
@@ -214,7 +217,7 @@ private struct CursorScrollStrip: View {
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: 25).fill(Theme.well))
-        .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(Theme.accent.opacity(touching ? 0.4 : 0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(Theme.accent.opacity(highlighting && enabled ? 0.4 : 0.12)))
         .contentShape(RoundedRectangle(cornerRadius: 25))
         .gesture(DragGesture(minimumDistance: 0)
             .updating($touching) { _, active, _ in active = true }
@@ -226,8 +229,14 @@ private struct CursorScrollStrip: View {
             }
             .onEnded { _ in endContact() })
         .onChange(of: touching) { _, active in if !active { endContact() } }
+        .onChange(of: activity) { _, _ in highlighting = enabled && touching && !ignoreUntilLift }
+        .task(id: activity) {
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            highlighting = false
+        }
         .onChange(of: enabled) { _, _ in
             ignoreUntilLift = touching
+            highlighting = false
             previous = nil
             release()
         }
@@ -249,6 +258,7 @@ private struct CursorScrollStrip: View {
     private func endContact() {
         previous = nil
         ignoreUntilLift = false
+        highlighting = false
         release()
     }
 }

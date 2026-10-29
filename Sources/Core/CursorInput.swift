@@ -52,7 +52,7 @@ enum CursorCommand: Equatable {
 
 enum CursorMotion {
     static let speedRange = 4.0...96.0
-    static let defaultSpeed = 32.0
+    static let defaultSpeed = 12.0
 
     static func validatedSpeed(_ value: Double) -> Double {
         value.isFinite ? min(speedRange.upperBound, max(speedRange.lowerBound, value)) : defaultSpeed
@@ -69,6 +69,24 @@ enum CursorMotion {
         let direction = reversed ? 1.0 : -1.0
         return CursorCommand.scroll(dx: dx * direction / 18, dy: dy * direction / 18).bounded
     }
+}
+
+/// Preserve slow drags, but only send complete wheel steps that can earn feedback.
+struct CursorScrollAccumulator {
+    private var x = 0.0
+    private var y = 0.0
+
+    mutating func append(dx: Double, dy: Double) -> CursorCommand? {
+        guard case let .scroll(dx, dy)? = CursorCommand.scroll(dx: dx, dy: dy).bounded else { return nil }
+        x += dx
+        y += dy
+        let wholeX = x.rounded(.towardZero), wholeY = y.rounded(.towardZero)
+        x -= wholeX
+        y -= wholeY
+        return CursorCommand.scroll(dx: wholeX, dy: wholeY).bounded
+    }
+
+    mutating func reset() { x = 0; y = 0 }
 }
 
 /// Feedback follows dispatched input, with no timer that can buzz during a stalled send.
@@ -103,11 +121,13 @@ struct CursorFeedbackPolicy {
 final class CursorSender {
     private(set) var unavailable = false
     private(set) var speed: Double
+    private(set) var scrollActivity = 0
     @ObservationIgnored private let send: (CursorCommand, RemoteInputRequest) async -> Bool
     @ObservationIgnored private let sleep: (Duration) async throws -> Void
     @ObservationIgnored private let now: () -> TimeInterval
     @ObservationIgnored private let saveSpeed: (Double) -> Void
     @ObservationIgnored private var feedback = CursorFeedbackPolicy()
+    @ObservationIgnored private var scrollAccumulator = CursorScrollAccumulator()
     @ObservationIgnored private var pending: [CursorCommand] = []
     @ObservationIgnored private var active: (command: CursorCommand, request: RemoteInputRequest)?
     @ObservationIgnored private var worker: Task<Void, Never>?
@@ -140,7 +160,9 @@ final class CursorSender {
     }
 
     func move(dx: Double, dy: Double) { enqueue(.move(dx: dx, dy: dy)) }
-    func scroll(dx: Double, dy: Double) { enqueue(.scroll(dx: dx, dy: dy)) }
+    func scroll(dx: Double, dy: Double) {
+        if let command = scrollAccumulator.append(dx: dx, dy: dy) { enqueue(command) }
+    }
 
     func press(_ command: CursorCommand) {
         guard !command.isContinuous else { return }
@@ -154,6 +176,7 @@ final class CursorSender {
         if active?.command.isContinuous == true { active?.request.cancel() }
         pause?.cancel()
         feedback.reset()
+        scrollAccumulator.reset()
     }
 
     func stop() {
@@ -207,10 +230,14 @@ final class CursorSender {
             if !request.isCancelled, token == generation {
                 unavailable = !sent
                 if sent {
+                    if case .scroll = command { scrollActivity += 1 }
                     if request.feedback != .none { nextFeedback.delivered(at: now()) }
                     feedback = nextFeedback
                 }
-                if !sent { pending.removeAll { $0.isContinuous } }
+                if !sent {
+                    pending.removeAll { $0.isContinuous }
+                    scrollAccumulator.reset()
+                }
             }
         }
     }

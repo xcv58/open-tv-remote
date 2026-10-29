@@ -179,6 +179,28 @@ struct RemoteDriverTests {
         driver.disconnect()
     }
 
+    @Test func lgScrollJitterNeverSendsZeroWheelPacketsOrEarnsFeedback() async {
+        let (driver, _, pointer) = connectLG()
+        var feedback: [RemoteInputRequest.Feedback] = []
+        let sender = CursorSender(send: { command, request in
+            let sent = await driver.sendCursor(command, request: request)
+            if sent { feedback.append(request.feedback) }
+            return sent
+        })
+        for rawDelta in [0.001, -0.001, 4.5, 4.5, 9.0] {
+            guard case let .scroll(dx, dy)? = CursorMotion.scroll(dx: 0, dy: rawDelta, reversed: false) else {
+                Issue.record("Expected nonzero raw scroll input"); continue
+            }
+            sender.scroll(dx: dx, dy: dy)
+        }
+        await waitUntil { sender.scrollActivity == 1 }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(pointer.sent == ["type:scroll\ndx:0.000\ndy:-1.000\n\n"])
+        #expect(feedback == [.firm])
+        #expect(sender.scrollActivity == 1)
+        sender.stop(); driver.disconnect()
+    }
+
     @Test func lgCursorRejectsInvalidAndCancelledInput() async {
         let (driver, _, pointer) = connectLG()
         let cancelled = RemoteInputRequest()
