@@ -21,6 +21,9 @@ final class LGDriver: TVDriver {
     private var pendingLaunch: TVApp?
     private var pendingButtons: [String] = []
     private var requestingPointer = false
+    private var pointerRequestID: String?
+    private var pointerGeneration = 0
+    private var pointerAcquisitionStarted: ContinuousClock.Instant?
 
     init(device: TVDevice) {
         self.device = device
@@ -39,7 +42,7 @@ final class LGDriver: TVDriver {
 
     func disconnect() {
         socket?.close()
-        pointer?.close()
+        invalidatePointerChannel()
         socket = nil
         pointer = nil
         callbacks = [:]
@@ -52,8 +55,7 @@ final class LGDriver: TVDriver {
 
     private func open(secure: Bool, prompting: Bool) {
         socket?.close()
-        pointer?.close()
-        pointer = nil
+        invalidatePointerChannel()
         let url = URL(string: secure ? "wss://\(device.host):3001" : "ws://\(device.host):3000")!
         let ws = LocalWebSocket(url: url)
         state = .connecting
@@ -144,23 +146,52 @@ final class LGDriver: TVDriver {
         }
     }
 
-    private func request(_ uri: String, _ payload: [String: Any] = [:], completion: (([String: Any]) -> Void)? = nil) {
-        guard let socket else { return }
+    @discardableResult
+    private func request(_ uri: String, _ payload: [String: Any] = [:], completion: (([String: Any]) -> Void)? = nil) -> String? {
+        guard let socket else { return nil }
         let id = "req_\(nextID)"
         nextID += 1
         if let completion { callbacks[id] = completion }
         socket.send(json: ["type": "request", "id": id, "uri": uri, "payload": payload])
+        return id
+    }
+
+    private func invalidatePointerChannel() {
+        pointerGeneration += 1
+        if let pointerRequestID { callbacks.removeValue(forKey: pointerRequestID) }
+        pointerRequestID = nil
+        requestingPointer = false
+        pointerAcquisitionStarted = nil
+        pointer?.close()
+        pointer = nil
+        pendingButtons = []
     }
 
     private func openPointerSocket() {
-        guard pointer == nil, !requestingPointer else { return }
+        if let started = pointerAcquisitionStarted, pointer?.isReady != true,
+           ContinuousClock.now - started >= .seconds(4) { invalidatePointerChannel() }
+        guard pointer == nil, !requestingPointer, let control = socket else { return }
+        let generation = pointerGeneration
         requestingPointer = true
-        request("ssap://com.webos.service.networkinput/getPointerInputSocket") { [weak self] payload in
-            guard let self else { return }
+        pointerAcquisitionStarted = .now
+        pointerRequestID = request("ssap://com.webos.service.networkinput/getPointerInputSocket") { [weak self] payload in
+            guard let self, self.socket === control, self.pointerGeneration == generation else { return }
             self.requestingPointer = false
-            guard let path = payload["socketPath"] as? String, let url = URL(string: path) else { return }
+            self.pointerRequestID = nil
+            guard let path = payload["socketPath"] as? String, let url = URL(string: path) else {
+                self.pointerAcquisitionStarted = nil
+                return
+            }
             let ws = LocalWebSocket(url: url)
-            ws.onClose = { [weak self] _ in self?.pointer = nil }
+            ws.onOpen = { [weak self, weak ws] in
+                guard let self, self.pointer === ws else { return }
+                self.pointerAcquisitionStarted = nil
+            }
+            ws.onClose = { [weak self, weak ws] _ in
+                guard let self, self.pointer === ws else { return }
+                self.pointer = nil
+                self.pointerAcquisitionStarted = nil
+            }
             self.pointer = ws
             ws.start()
             // URLSessionWebSocketTask holds sends until the handshake completes.
@@ -240,13 +271,18 @@ final class LGDriver: TVDriver {
             guard max(abs(dx), abs(dy)) <= CursorCommand.maximumPacketDelta + 0.001 else { return false }
         }
         if pointer?.isReady != true {
-            if pointer == nil { openPointerSocket() }
+            openPointerSocket()
+            let generation = pointerGeneration
             // Never replay a drag after recovering a socket. A new gesture can try again.
             guard !command.isContinuous else { return false }
             let deadline = ContinuousClock.now + .seconds(4)
             while pointer?.isReady != true {
                 guard state == .connected, socket === control, !input.isCancelled,
-                      !Task.isCancelled, ContinuousClock.now < deadline else { return false }
+                      !Task.isCancelled, pointerGeneration == generation else { return false }
+                guard ContinuousClock.now < deadline else {
+                    invalidatePointerChannel()
+                    return false
+                }
                 do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
             }
         }
@@ -264,7 +300,7 @@ final class LGDriver: TVDriver {
         }
         let sent = await pointer.sendReportingResult(packet)
         guard socket === control, self.pointer === pointer, state == .connected else { return false }
-        if !sent { pointer.close(); self.pointer = nil }
+        if !sent { invalidatePointerChannel() }
         return sent && !input.isCancelled
     }
 

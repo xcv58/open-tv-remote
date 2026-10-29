@@ -12,6 +12,7 @@ final class AppModel: TVDriverDelegate {
     private(set) var devices: [TVDevice] = DeviceStore.load()
     private(set) var currentID: String? = DeviceStore.currentID
     private(set) var state: ConnectionState = .idle
+    private(set) var supportsCursor = false
     private(set) var installedApps: [TVApp]?
     /// True while we search the network for a saved TV that stopped answering at its old address.
     private(set) var isRelocating = false
@@ -58,7 +59,9 @@ final class AppModel: TVDriverDelegate {
     let discovery = Discovery()
     let jellyfin = JellyfinStore()
 
-    @ObservationIgnored private var driver: TVDriver?
+    @ObservationIgnored private var driver: TVDriver? {
+        didSet { supportsCursor = driver?.supportsCursor == true }
+    }
     @ObservationIgnored private var relocateTask: Task<Void, Never>?
     @ObservationIgnored private var relocationAttempted = false
 
@@ -72,6 +75,7 @@ final class AppModel: TVDriverDelegate {
             let driver = DemoDriver(device: DemoMode.devices[0])
             driver.delegate = self
             self.driver = driver
+            supportsCursor = driver.supportsCursor
             state = .connected
             switch DemoMode.sheet {
             case "apps": showingApps = true
@@ -383,8 +387,6 @@ final class AppModel: TVDriverDelegate {
     }
 
     func supports(_ key: RemoteKey) -> Bool { driver?.supports(key) ?? true }
-
-    var supportsCursor: Bool { driver?.supportsCursor == true }
 
     func sendCursor(_ command: CursorCommand, request: RemoteInputRequest) async -> Bool {
         guard state == .connected, !isConnectionPaused, !request.isCancelled, !Task.isCancelled,
