@@ -236,6 +236,9 @@ final class LGDriver: TVDriver {
     func sendCursor(_ command: CursorCommand, request input: RemoteInputRequest) async -> Bool {
         guard state == .connected, !input.isCancelled, !Task.isCancelled,
               let command = command.bounded, let control = socket else { return false }
+        if case let .move(dx, dy) = command {
+            guard max(abs(dx), abs(dy)) <= CursorCommand.maximumPacketDelta + 0.001 else { return false }
+        }
         if pointer?.isReady != true {
             if pointer == nil { openPointerSocket() }
             // Never replay a drag after recovering a socket. A new gesture can try again.

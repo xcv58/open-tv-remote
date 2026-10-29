@@ -2,6 +2,8 @@ import Foundation
 import Observation
 
 enum CursorCommand: Equatable {
+    static let maximumPacketDelta = 96.0
+    static let pendingMovementLimit = 768.0
     case move(dx: Double, dy: Double)
     case scroll(dx: Double, dy: Double)
     case click, back, home
@@ -13,7 +15,7 @@ enum CursorCommand: Equatable {
     /// Bound a slow connection's accumulated movement and reject invalid sensor/gesture values.
     var bounded: CursorCommand? {
         switch self {
-        case .move(let dx, let dy): return Self.delta(dx, dy, limit: 1024, scroll: false)
+        case .move(let dx, let dy): return Self.delta(dx, dy, limit: Self.pendingMovementLimit, scroll: false)
         case .scroll(let dx, let dy): return Self.delta(dx, dy, limit: 12, scroll: true)
         default: return self
         }
@@ -32,14 +34,34 @@ enum CursorCommand: Equatable {
         default: return nil
         }
     }
+
+    /// Keep wire movements small and retain the rest until sent or the gesture ends.
+    /// The pending budget is separate from the per-packet compatibility size.
+    var nextPacket: (command: CursorCommand, remainder: CursorCommand?) {
+        guard case let .move(dx, dy) = self else { return (self, nil) }
+        let largest = max(abs(dx), abs(dy))
+        guard largest > Self.maximumPacketDelta else { return (self, nil) }
+        let fraction = Self.maximumPacketDelta / largest
+        let x = dx * fraction, y = dy * fraction
+        let remainingX = dx - x, remainingY = dy - y
+        let remainder: CursorCommand? = max(abs(remainingX), abs(remainingY)) >= 0.0005
+            ? .move(dx: remainingX, dy: remainingY) : nil
+        return (.move(dx: x, dy: y), remainder)
+    }
 }
 
 enum CursorMotion {
-    /// Slow motions retain precision; fast swipes get up to twice the base gain.
-    static func move(dx: Double, dy: Double, velocity: Double, speed: Double) -> CursorCommand? {
-        guard dx.isFinite, dy.isFinite, velocity.isFinite, speed.isFinite else { return nil }
-        let acceleration = 1 + min(1, max(0, (velocity - 100) / 500))
-        let gain = 4 * min(6, max(0.5, speed)) * acceleration
+    static let speedRange = 4.0...96.0
+    static let defaultSpeed = 32.0
+
+    static func validatedSpeed(_ value: Double) -> Double {
+        value.isFinite ? min(speedRange.upperBound, max(speedRange.lowerBound, value)) : defaultSpeed
+    }
+
+    /// One predictable linear gain: slider changes never depend on swipe velocity.
+    static func move(dx: Double, dy: Double, speed: Double) -> CursorCommand? {
+        guard dx.isFinite, dy.isFinite, speed.isFinite else { return nil }
+        let gain = validatedSpeed(speed)
         return CursorCommand.move(dx: dx * gain, dy: dy * gain).bounded
     }
 
@@ -51,27 +73,26 @@ enum CursorMotion {
 
 /// Feedback follows dispatched input, with no timer that can buzz during a stalled send.
 struct CursorFeedbackPolicy {
-    private var lastPulse: (time: TimeInterval, scrolling: Bool)?
+    private var lastPulse: TimeInterval?
 
     mutating func next(_ command: CursorCommand, time: TimeInterval) -> RemoteInputRequest.Feedback {
         guard time.isFinite else { return .none }
-        guard command.isContinuous else { return .firm }
-        let scrolling: Bool
-        if case .scroll = command { scrolling = true } else { scrolling = false }
-        guard let previous = lastPulse, previous.scrolling == scrolling else {
-            lastPulse = (time, scrolling)
+        if case .move = command { return .none }
+        guard case .scroll = command else { return .firm }
+        guard let previous = lastPulse else {
+            lastPulse = time
             return .firm
         }
-        guard time - previous.time >= (scrolling ? 0.12 : 0.25) else { return .none }
-        lastPulse = (time, scrolling)
+        guard time - previous >= 0.12 else { return .none }
+        lastPulse = time
         return .soft
     }
 
     mutating func reset() { lastPulse = nil }
 
     mutating func delivered(at time: TimeInterval) {
-        guard time.isFinite, let lastPulse else { return }
-        self.lastPulse = (time, lastPulse.scrolling)
+        guard time.isFinite, lastPulse != nil else { return }
+        lastPulse = time
     }
 }
 
@@ -81,9 +102,11 @@ struct CursorFeedbackPolicy {
 @Observable
 final class CursorSender {
     private(set) var unavailable = false
+    private(set) var speed: Double
     @ObservationIgnored private let send: (CursorCommand, RemoteInputRequest) async -> Bool
     @ObservationIgnored private let sleep: (Duration) async throws -> Void
     @ObservationIgnored private let now: () -> TimeInterval
+    @ObservationIgnored private let saveSpeed: (Double) -> Void
     @ObservationIgnored private var feedback = CursorFeedbackPolicy()
     @ObservationIgnored private var pending: [CursorCommand] = []
     @ObservationIgnored private var active: (command: CursorCommand, request: RemoteInputRequest)?
@@ -93,10 +116,27 @@ final class CursorSender {
 
     init(send: @escaping (CursorCommand, RemoteInputRequest) async -> Bool,
          sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         speed: Double = CursorMotion.defaultSpeed, saveSpeed: @escaping (Double) -> Void = { _ in }) {
         self.send = send
         self.sleep = sleep
         self.now = now
+        self.speed = CursorMotion.validatedSpeed(speed)
+        self.saveSpeed = saveSpeed
+    }
+
+    func setSpeed(_ value: Double) {
+        let value = CursorMotion.validatedSpeed(value)
+        guard value != speed else { return }
+        release()
+        speed = value
+        saveSpeed(value)
+    }
+
+    func drag(dx: Double, dy: Double) {
+        if case let .move(x, y)? = CursorMotion.move(dx: dx, dy: dy, speed: speed) {
+            move(dx: x, dy: y)
+        }
     }
 
     func move(dx: Double, dy: Double) { enqueue(.move(dx: dx, dy: dy)) }
@@ -146,14 +186,19 @@ final class CursorSender {
         while !pending.isEmpty {
             if pending[0].isContinuous {
                 let token = generation, sleep = self.sleep
-                let wait = Task { @MainActor in try await sleep(.milliseconds(25)) }
+                let delay: Duration
+                if case .move = pending[0] { delay = .milliseconds(8) }
+                else { delay = .milliseconds(25) }
+                let wait = Task { @MainActor in try await sleep(delay) }
                 pause = wait
                 do { try await wait.value } catch { }
                 pause = nil
                 guard token == generation else { continue }
             }
             guard !pending.isEmpty else { continue }
-            let command = pending.removeFirst(), token = generation
+            let packet = pending.removeFirst().nextPacket, token = generation
+            let command = packet.command
+            if let remainder = packet.remainder { pending.insert(remainder, at: 0) }
             var nextFeedback = feedback
             let request = RemoteInputRequest(feedback: nextFeedback.next(command, time: now()))
             active = (command, request)

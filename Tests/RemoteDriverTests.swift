@@ -170,6 +170,15 @@ struct RemoteDriverTests {
         driver.disconnect()
     }
 
+    @Test func lgCursorRejectsOversizedWireMovesInsteadOfSendingThem() async {
+        let (driver, _, pointer) = connectLG()
+        #expect(!(await driver.sendCursor(.move(dx: 500, dy: 0), request: RemoteInputRequest())))
+        #expect(pointer.sent.isEmpty)
+        #expect(await driver.sendCursor(.move(dx: 96, dy: 0), request: RemoteInputRequest()))
+        #expect(pointer.sent == ["type:move\ndx:96.000\ndy:0.000\ndown:0\n\n"])
+        driver.disconnect()
+    }
+
     @Test func lgCursorRejectsInvalidAndCancelledInput() async {
         let (driver, _, pointer) = connectLG()
         let cancelled = RemoteInputRequest()
