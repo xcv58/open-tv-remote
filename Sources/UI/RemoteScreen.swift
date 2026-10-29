@@ -11,8 +11,7 @@ struct RemoteScreen: View {
             // phone — a scroll that starts on a key would otherwise press it.
             let compact = geo.size.height < 760
             let spacing: CGFloat = compact ? 10 : 18
-            let cursorHeight: CGFloat = model.supportsCursor ? 44 + spacing : 0
-            let fixed: CGFloat = 48 + 54 + 192 + spacing * 4 + 28 + PageSwitcher.height + cursorHeight
+            let fixed: CGFloat = 48 + 54 + 192 + spacing * 4 + 28 + PageSwitcher.height
             // The keyboard has too many keys to share the screen, so it takes the controls' space too.
             let padHeight = mode == .keyboard
                 ? max(300, geo.size.height - (fixed - 192 - spacing) - 8)
@@ -22,19 +21,6 @@ struct RemoteScreen: View {
                     TopBar()
                     StatusBanner()
                     navRow
-                    if model.supportsCursor {
-                        Button {
-                            Haptics.tap()
-                            model.remoteControlMode = .cursor
-                        } label: {
-                            Label("LG Cursor", systemImage: "cursorarrow")
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(Capsule().fill(Theme.well))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("openLGCursor")
-                    }
                     pad
                         .frame(height: padHeight)
                         .overlay(alignment: .bottomTrailing) {
@@ -69,7 +55,9 @@ struct RemoteScreen: View {
         HStack(spacing: 12) {
             RemoteKeyButton(key: .back, symbol: "arrow.uturn.backward")
                 .frame(width: 58)
-            ModePicker(mode: $mode) { model.showingJoystick = true }
+            ModePicker(mode: $mode, supportsCursor: model.supportsCursor,
+                       openJoystick: { model.showingJoystick = true },
+                       openCursor: { model.remoteControlMode = .cursor })
             RemoteKeyButton(key: .home, symbol: "house.fill")
                 .frame(width: 58)
         }
@@ -292,11 +280,14 @@ private struct StatusBanner: View {
 
 private struct ModePicker: View {
     @Binding var mode: PadMode
+    let supportsCursor: Bool
     var openJoystick: () -> Void
+    var openCursor: () -> Void
     @Namespace private var ns
 
     var body: some View {
-        HStack(spacing: 4) {
+        GeometryReader { geo in
+          HStack(spacing: 4) {
             ForEach(PadMode.allCases) { m in
                 Button {
                     Haptics.tap()
@@ -317,23 +308,41 @@ private struct ModePicker: View {
                 .accessibilityLabel(m.title)
                 .accessibilityAddTraits(mode == m ? .isSelected : [])
             }
-            Button {
-                Haptics.tap()
-                openJoystick()
-            } label: {
-                Image(systemName: "l.joystick.tilt.up.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Capsule())
+            if supportsCursor && geo.size.width < 236 {
+                Menu {
+                    Button("Cursor", systemImage: "cursorarrow") { Haptics.tap(); openCursor() }
+                    Button("Eyes-free", systemImage: "l.joystick.tilt.up.fill") { Haptics.tap(); openJoystick() }
+                } label: {
+                    modeIcon("ellipsis")
+                }
+                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+                .accessibilityLabel("More control modes")
+            } else {
+                Button { Haptics.tap(); openJoystick() } label: { modeIcon("l.joystick.tilt.up.fill") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Eyes-free mode")
+                    .accessibilityIdentifier("openEyesFree")
+                if supportsCursor {
+                    Button { Haptics.tap(); openCursor() } label: { modeIcon("cursorarrow") }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cursor mode")
+                        .accessibilityIdentifier("openLGCursor")
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Eyes-free mode")
-            .accessibilityIdentifier("openEyesFree")
+          }
         }
         .padding(5)
         .background(Capsule().fill(Theme.well))
         .overlay(Capsule().strokeBorder(.white.opacity(0.05), lineWidth: 1))
+    }
+
+    private func modeIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
     }
 }
 

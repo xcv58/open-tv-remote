@@ -21,6 +21,7 @@ enum Haptics {
     private static let rigid = UIImpactFeedbackGenerator(style: .rigid)
     private static let firm = UIImpactFeedbackGenerator(style: .medium)
     private static let repeatPulse = UIImpactFeedbackGenerator(style: .light)
+    private static let cursorPulse = UIImpactFeedbackGenerator(style: .light)
     #endif
 
     static func tap() {
@@ -39,6 +40,20 @@ enum Haptics {
         #if os(iOS)
         firm.impactOccurred(intensity: 0.8)
         repeatPulse.prepare()
+        #endif
+    }
+
+    static func cursorStart() {
+        #if os(iOS)
+        firm.impactOccurred(intensity: 0.8)
+        cursorPulse.prepare()
+        #endif
+    }
+
+    static func cursorTick() {
+        #if os(iOS)
+        cursorPulse.impactOccurred()
+        cursorPulse.prepare()
         #endif
     }
 

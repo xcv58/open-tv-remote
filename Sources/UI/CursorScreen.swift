@@ -12,7 +12,15 @@ struct CursorScreen: View {
                        enabled: model.supportsCursor && model.state == .connected,
                        sessionID: model.currentID, close: { dismiss() }) { command, request in
             let sent = await model.sendCursor(command, request: request)
-            if sent, !command.isContinuous { Haptics.tick() }
+            if sent {
+                switch request.feedback {
+                case .firm:
+                    if command.isContinuous { Haptics.cursorStart() }
+                    else { Haptics.tap() }
+                case .soft: Haptics.cursorTick()
+                case .none: break
+                }
+            }
             return sent
         }
     }
@@ -21,6 +29,7 @@ struct CursorScreen: View {
 private struct CursorControls: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("cursor.sensitivity.v1") private var sensitivity = 1.5
+    @AppStorage("cursor.reverseScroll.v1") private var reverseScroll = false
     @State private var sender: CursorSender
     let tvName: String
     let enabled: Bool
@@ -47,7 +56,13 @@ private struct CursorControls: View {
                     .foregroundStyle(sender.unavailable ? Theme.power : Theme.secondary)
                     .multilineTextAlignment(.center)
             }
-            touchpad
+            HStack(spacing: 12) {
+                touchpad
+                CursorScrollStrip(enabled: enabled && scenePhase == .active,
+                                  scroll: { scroll(0, $0) }, release: { sender.release() })
+                    .frame(width: 56)
+                    .id(sessionID)
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minHeight: 180)
             VStack(spacing: 6) {
@@ -58,12 +73,12 @@ private struct CursorControls: View {
                         .monospacedDigit()
                 }
                 .font(.system(size: 13, weight: .medium))
-                Slider(value: $sensitivity, in: 0.5...3, step: 0.25)
+                Slider(value: $sensitivity, in: 0.5...6, step: 0.25,
+                       onEditingChanged: { if !$0 { Haptics.tap() } })
                     .accessibilityLabel("Cursor speed")
-            }
-            HStack(spacing: 12) {
-                action("Scroll up", symbol: "arrow.up", command: .scroll(dx: 0, dy: -1))
-                action("Scroll down", symbol: "arrow.down", command: .scroll(dx: 0, dy: 1))
+                Toggle("Reverse scrolling", isOn: $reverseScroll)
+                    .font(.system(size: 13))
+                    .onChange(of: reverseScroll) { _, _ in sender.release(); Haptics.tap() }
             }
             HStack(spacing: 12) {
                 action("Back", symbol: "arrow.uturn.backward", command: .back)
@@ -88,15 +103,15 @@ private struct CursorControls: View {
         if !enabled { return "Close cursor mode to choose or reconnect to a TV." }
         if sender.unavailable { return "Cursor not ready. Try again, or close to reconnect." }
         #if os(iOS)
-        return "Two fingers to scroll · Lift to stop"
+        return "Scroll with two fingers or the side strip"
         #else
-        return "Drag to move · Use the scroll buttons below"
+        return "Drag the side strip to scroll"
         #endif
     }
 
     private var header: some View {
         HStack(spacing: 14) {
-            Button { sender.stop(); close() } label: {
+            Button { sender.stop(); Haptics.tap(); close() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 48, height: 48)
@@ -130,15 +145,13 @@ private struct CursorControls: View {
             .allowsHitTesting(false)
             #if os(iOS)
             CursorTouchpad(enabled: enabled && scenePhase == .active,
-                           move: { dx, dy in move(dx, dy) },
-                           scroll: { dx, dy in
-                               guard enabled, scenePhase == .active else { return }
-                               sender.scroll(dx: -dx / 28, dy: -dy / 28)
-                           }, click: { press(.click) }, release: { sender.release() })
+                           move: { dx, dy, velocity in move(dx, dy, velocity: velocity) },
+                           scroll: { dx, dy in scroll(dx, dy) },
+                           click: { press(.click) }, release: { sender.release() })
                 .id(sessionID)
             #else
             MacCursorTouchpad(enabled: enabled && scenePhase == .active,
-                              move: { dx, dy in move(dx, dy) },
+                              move: { dx, dy, velocity in move(dx, dy, velocity: velocity) },
                               click: { press(.click) }, release: { sender.release() })
                 .id(sessionID)
             #endif
@@ -149,11 +162,7 @@ private struct CursorControls: View {
 
     private func action(_ title: String, symbol: String, command: CursorCommand) -> some View {
         Button {
-            if command.isContinuous {
-                guard enabled, scenePhase == .active else { return }
-                sender.release()
-                if case let .scroll(dx, dy) = command { sender.scroll(dx: dx, dy: dy) }
-            } else { press(command) }
+            press(command)
         } label: {
             Label(title, systemImage: symbol)
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -163,9 +172,18 @@ private struct CursorControls: View {
         .buttonStyle(.plain).disabled(!enabled)
     }
 
-    private func move(_ dx: Double, _ dy: Double) {
+    private func move(_ dx: Double, _ dy: Double, velocity: Double) {
         guard enabled, scenePhase == .active else { return }
-        sender.move(dx: dx * min(3, max(0.5, sensitivity)), dy: dy * min(3, max(0.5, sensitivity)))
+        if case let .move(x, y)? = CursorMotion.move(dx: dx, dy: dy, velocity: velocity, speed: sensitivity) {
+            sender.move(dx: x, dy: y)
+        }
+    }
+
+    private func scroll(_ dx: Double, _ dy: Double) {
+        guard enabled, scenePhase == .active else { return }
+        if case let .scroll(x, y)? = CursorMotion.scroll(dx: dx, dy: dy, reversed: reverseScroll) {
+            sender.scroll(dx: x, dy: y)
+        }
     }
 
     private func press(_ command: CursorCommand) {
@@ -174,12 +192,73 @@ private struct CursorControls: View {
     }
 }
 
+private struct CursorScrollStrip: View {
+    let enabled: Bool
+    let scroll: (Double) -> Void
+    let release: () -> Void
+    @State private var previous: CGFloat?
+    @State private var ignoreUntilLift = false
+    @GestureState private var touching = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "chevron.up")
+            Spacer(minLength: 0)
+            Capsule().fill(Theme.accent.opacity(touching && enabled ? 0.9 : 0.35))
+                .frame(width: 8, height: 50)
+            Text("Scroll").font(.system(size: 11, weight: .semibold))
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.down")
+        }
+        .foregroundStyle(Theme.secondary)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 25).fill(Theme.well))
+        .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(Theme.accent.opacity(touching ? 0.4 : 0.12)))
+        .contentShape(RoundedRectangle(cornerRadius: 25))
+        .gesture(DragGesture(minimumDistance: 0)
+            .updating($touching) { _, active, _ in active = true }
+            .onChanged { value in
+                guard enabled, !ignoreUntilLift else { return }
+                if previous == nil { release() }
+                scroll(Double(value.translation.height - (previous ?? 0)))
+                previous = value.translation.height
+            }
+            .onEnded { _ in endContact() })
+        .onChange(of: touching) { _, active in if !active { endContact() } }
+        .onChange(of: enabled) { _, _ in
+            ignoreUntilLift = touching
+            previous = nil
+            release()
+        }
+        .onDisappear { release() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Scroll strip")
+        .accessibilityHint("Slide up or down to scroll the TV content under the pointer.")
+        .accessibilityAdjustableAction { direction in
+            guard enabled else { return }
+            release()
+            switch direction {
+            case .increment: scroll(-18)
+            case .decrement: scroll(18)
+            @unknown default: break
+            }
+        }
+    }
+
+    private func endContact() {
+        previous = nil
+        ignoreUntilLift = false
+        release()
+    }
+}
+
 #if os(iOS)
 /// Native recognizers distinguish pointer movement, two-finger scrolling and a tap.
 /// A cancelled/scrolling gesture must never turn into a pointer click.
 private struct CursorTouchpad: UIViewRepresentable {
     let enabled: Bool
-    let move: (Double, Double) -> Void
+    let move: (Double, Double, Double) -> Void
     let scroll: (Double, Double) -> Void
     let click: () -> Void
     let release: () -> Void
@@ -234,7 +313,10 @@ private struct CursorTouchpad: UIViewRepresentable {
                 let delta = pan.translation(in: pan.view)
                 pan.setTranslation(.zero, in: pan.view)
                 if scrolling { parent.scroll(Double(delta.x), Double(delta.y)) }
-                else { parent.move(Double(delta.x), Double(delta.y)) }
+                else {
+                    let velocity = pan.velocity(in: pan.view)
+                    parent.move(Double(delta.x), Double(delta.y), hypot(Double(velocity.x), Double(velocity.y)))
+                }
             case .ended, .cancelled, .failed: parent.release()
             default: break
             }
@@ -244,12 +326,13 @@ private struct CursorTouchpad: UIViewRepresentable {
 #else
 private struct MacCursorTouchpad: View {
     let enabled: Bool
-    let move: (Double, Double) -> Void
+    let move: (Double, Double, Double) -> Void
     let click: () -> Void
     let release: () -> Void
     @State private var previous: CGSize = .zero
     @State private var dragging = false
     @State private var ignoreUntilLift = false
+    @State private var previousTime: TimeInterval?
 
     var body: some View {
         Color.clear.contentShape(Rectangle())
@@ -257,11 +340,17 @@ private struct MacCursorTouchpad: View {
                 .onChanged { value in
                     dragging = true
                     guard enabled, !ignoreUntilLift else { return }
-                    move(Double(value.translation.width - previous.width), Double(value.translation.height - previous.height))
+                    let dx = Double(value.translation.width - previous.width)
+                    let dy = Double(value.translation.height - previous.height)
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let elapsed = max(1.0 / 240, now - (previousTime ?? now - 1.0 / 60))
+                    move(dx, dy, hypot(dx, dy) / elapsed)
+                    previousTime = now
                     previous = value.translation
                 }
                 .onEnded { _ in
                     previous = .zero
+                    previousTime = nil
                     dragging = false
                     ignoreUntilLift = false
                     release()
@@ -270,6 +359,7 @@ private struct MacCursorTouchpad: View {
             .onChange(of: enabled) { _, _ in
                 ignoreUntilLift = dragging
                 previous = .zero
+                previousTime = nil
                 release()
             }
             .accessibilityLabel("LG cursor touchpad")
