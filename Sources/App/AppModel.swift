@@ -10,6 +10,7 @@ final class AppModel: TVDriverDelegate {
     private(set) var installedApps: [TVApp]?
     /// True while we search the network for a saved TV that stopped answering at its old address.
     private(set) var isRelocating = false
+    private(set) var isWakingTV = false
 
     var showingDevices = false
     var showingKeyboard = false
@@ -110,6 +111,7 @@ final class AppModel: TVDriverDelegate {
     }
 
     private func activate(_ device: TVDevice) {
+        isWakingTV = false
         driver?.disconnect()
         relocateTask?.cancel()
         relocateTask = nil
@@ -206,7 +208,41 @@ final class AppModel: TVDriverDelegate {
 
     // MARK: Commands
 
-    func press(_ key: RemoteKey) { driver?.send(key) }
+    func press(_ key: RemoteKey) {
+        if key == .power, current?.brand == .lg, state != .connected {
+            wakeTV()
+            return
+        }
+        driver?.send(key)
+    }
+
+    /// Waking is always a deliberate action on the currently selected, already paired LG TV.
+    func wakeTV() {
+        guard let lg = driver as? LGDriver, current?.hasCredentials == true,
+              state != .connected, !isWakingTV else { return }
+        guard let mac = current?.macAddress, WakeOnLAN.macBytes(mac) != nil else {
+            showingSettings = true
+            return
+        }
+        relocateTask?.cancel()
+        relocateTask = nil
+        isRelocating = false
+        relocationAttempted = true
+        isWakingTV = true
+        if !lg.wake() { isWakingTV = false }
+    }
+
+    func cancelWakeTV() { driver?.disconnect() }
+
+    @discardableResult
+    func saveWakeAddress(_ address: String, for deviceID: String) -> Bool {
+        guard currentID == deviceID, let index = devices.firstIndex(where: { $0.id == deviceID && $0.brand == .lg }),
+              let mac = WakeOnLAN.normalizedMAC(address) else { return false }
+        devices[index].macAddress = mac
+        DeviceStore.save(devices)
+        activate(devices[index])
+        return true
+    }
 
     func supports(_ key: RemoteKey) -> Bool { driver?.supports(key) ?? true }
 
@@ -305,8 +341,10 @@ final class AppModel: TVDriverDelegate {
 
     func driver(_ driver: TVDriver, didChangeState state: ConnectionState) {
         guard driver === self.driver else { return }
+        let wasWaking = isWakingTV
+        if state != .connecting { isWakingTV = false }
         self.state = state
-        if case .failed = state, let current {
+        if case .failed = state, !wasWaking, let current {
             relocate(current)
         }
         if state == .connected, installedApps == nil {
@@ -315,7 +353,7 @@ final class AppModel: TVDriverDelegate {
     }
 
     func driver(_ driver: TVDriver, didUpdateDevice device: TVDevice) {
-        guard let i = devices.firstIndex(where: { $0.id == device.id }) else { return }
+        guard driver === self.driver, let i = devices.firstIndex(where: { $0.id == device.id }) else { return }
         devices[i] = device
         DeviceStore.save(devices)
     }

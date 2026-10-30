@@ -21,12 +21,22 @@ final class LGDriver: TVDriver {
     private var pendingLaunch: TVApp?
     private var pendingButtons: [String] = []
     private var requestingPointer = false
+    private var wakeTask: Task<Void, Never>?
+    private var wakeGeneration = 0
+    private let sendWakePacket: (String, String) -> Bool
+    private let wakeInterval: Duration
 
-    init(device: TVDevice) {
+    var isWaking: Bool { wakeTask != nil }
+
+    init(device: TVDevice, sendWakePacket: @escaping (String, String) -> Bool = { WakeOnLAN.wake(mac: $0, host: $1) },
+         wakeInterval: Duration = .seconds(3)) {
         self.device = device
+        self.sendWakePacket = sendWakePacket
+        self.wakeInterval = wakeInterval
     }
 
     func connect() {
+        cancelWake()
         guard device.token != nil else {
             state = .unpaired
             return
@@ -34,10 +44,14 @@ final class LGDriver: TVDriver {
         open(secure: true, prompting: false)
     }
 
-    func pair() { open(secure: true, prompting: true) }
+    func pair() {
+        cancelWake()
+        open(secure: true, prompting: true)
+    }
     func submitPairingCode(_ code: String) {}
 
     func disconnect() {
+        cancelWake()
         socket?.close()
         pointer?.close()
         socket = nil
@@ -50,6 +64,55 @@ final class LGDriver: TVDriver {
         state = .idle
     }
 
+    /// Explicit wake action only. A connection, discovery, or a queued Power press never wakes a TV.
+    @discardableResult
+    func wake() -> Bool {
+        guard !isWaking, state != .connected, device.token != nil,
+              let mac = device.macAddress, WakeOnLAN.macBytes(mac) != nil else { return false }
+        // No old command may run after the TV wakes, especially turnOff.
+        pendingKeys = []
+        pendingButtons = []
+        pendingLaunch = nil
+        callbacks = [:]
+        socket?.close()
+        pointer?.close()
+        socket = nil
+        pointer = nil
+        requestingPointer = false
+        guard sendWakePacket(mac, device.host) else {
+            state = .failed("Couldn't send the wake request. Check Local Network access and your Wi-Fi connection.")
+            return false
+        }
+        wakeGeneration += 1
+        let generation = wakeGeneration
+        wakeTask = Task { [weak self] in
+            for attempt in 0..<5 {
+                guard let self, !Task.isCancelled, self.wakeGeneration == generation else { return }
+                if attempt > 0 { _ = self.sendWakePacket(mac, self.device.host) }
+                self.open(secure: true, prompting: false)
+                do { try await Task.sleep(for: self.wakeInterval) } catch { return }
+                guard self.wakeGeneration == generation, self.state != .connected else { return }
+            }
+            guard let self, self.wakeGeneration == generation, !Task.isCancelled else { return }
+            self.cancelWake()
+            self.socket?.close()
+            self.pointer?.close()
+            self.socket = nil
+            self.pointer = nil
+            self.callbacks = [:]
+            self.requestingPointer = false
+            self.state = .failed("The TV didn't respond. Check its MAC address and enable TV On With Mobile → Turn on via Wi-Fi in the TV's settings. Some models require Ethernet or different standby settings.")
+        }
+        state = .connecting
+        return true
+    }
+
+    private func cancelWake() {
+        wakeGeneration += 1
+        wakeTask?.cancel()
+        wakeTask = nil
+    }
+
     private func open(secure: Bool, prompting: Bool) {
         socket?.close()
         pointer?.close()
@@ -58,24 +121,28 @@ final class LGDriver: TVDriver {
         let ws = LocalWebSocket(url: url)
         state = .connecting
         var opened = false
-        ws.onOpen = { [weak self] in
+        ws.onOpen = { [weak self, weak ws] in
+            guard let self, let ws, self.socket === ws else { return }
             opened = true
-            self?.register(prompting: prompting)
+            self.register(prompting: prompting)
         }
-        ws.onText = { [weak self] text in
-            guard let self, let json = JSON.parse(text) else { return }
+        ws.onText = { [weak self, weak ws] text in
+            guard let self, let ws, self.socket === ws, let json = JSON.parse(text) else { return }
             if (json["id"] as? String) == "register_0" {
                 self.handleRegistration(json)
             } else if let id = json["id"] as? String, let callback = self.callbacks.removeValue(forKey: id) {
                 callback(json["payload"] as? [String: Any] ?? [:])
             }
         }
-        ws.onClose = { [weak self] _ in
-            guard let self else { return }
+        ws.onClose = { [weak self, weak ws] _ in
+            guard let self, let ws, self.socket === ws else { return }
             self.socket = nil
             if !opened && secure {
                 // Older firmware only speaks plain ws on 3000.
                 self.open(secure: false, prompting: prompting)
+            } else if self.isWaking {
+                // The bounded wake task retries without discovering or pairing other devices.
+                return
             } else if self.state == .connected {
                 self.state = .idle
             } else if case .pairing = self.state {
@@ -116,11 +183,13 @@ final class LGDriver: TVDriver {
             if (payload?["pairingType"] as? String) == "PROMPT" { state = .pairing(.acceptOnTV) }
             return false
         case "registered":
+            cancelWake()
             if let key = payload?["client-key"] as? String, key != device.token {
                 device.token = key
                 delegate?.driver(self, didUpdateDevice: device)
             }
             state = .connected
+            refreshWakeAddress()
             openPointerSocket()
             let queued = pendingKeys
             pendingKeys = []
@@ -131,6 +200,7 @@ final class LGDriver: TVDriver {
             }
             return true
         case "error":
+            cancelWake()
             if device.token != nil {
                 device.token = nil
                 delegate?.driver(self, didUpdateDevice: device)
@@ -142,6 +212,39 @@ final class LGDriver: TVDriver {
         default:
             return false
         }
+    }
+
+    private func refreshWakeAddress() {
+        guard device.macAddress == nil else { return }
+        request("ssap://com.webos.service.connectionmanager/getStatus") { [weak self] status in
+            guard let self else { return }
+            self.request("ssap://com.webos.service.connectionmanager/getinfo") { [weak self] info in
+                guard let self, self.device.macAddress == nil,
+                      let mac = Self.wakeAddress(info: info, status: status, host: self.device.host) else { return }
+                self.device.macAddress = mac
+                self.delegate?.driver(self, didUpdateDevice: self.device)
+            }
+        }
+    }
+
+    /// Choose the interface serving this TV address; never guess between Wi-Fi and Ethernet.
+    static func wakeAddress(info: [String: Any], status: [String: Any], host: String) -> String? {
+        let interfaces = [("wired", "wiredInfo"), ("wifi", "wifiInfo")]
+        for (connection, details) in interfaces {
+            guard let network = status[connection] as? [String: Any],
+                  network["state"] as? String == "connected", network["ipAddress"] as? String == host,
+                  let values = info[details] as? [String: Any], let raw = values["macAddress"] as? String,
+                  let mac = WakeOnLAN.normalizedMAC(raw) else { continue }
+            return mac
+        }
+        if interfaces.contains(where: { (status[$0.0] as? [String: Any])?["state"] as? String == "connected" }) {
+            return nil
+        }
+        let known = Set(interfaces.compactMap { _, details -> String? in
+            guard let values = info[details] as? [String: Any], let raw = values["macAddress"] as? String else { return nil }
+            return WakeOnLAN.normalizedMAC(raw)
+        })
+        return known.count == 1 ? known.first : nil
     }
 
     private func request(_ uri: String, _ payload: [String: Any] = [:], completion: (([String: Any]) -> Void)? = nil) {
@@ -178,7 +281,10 @@ final class LGDriver: TVDriver {
     }
 
     func send(_ key: RemoteKey) {
+        guard !isWaking else { return }
         guard state == .connected else {
+            // Power off is never queued for later replay. Waking has its own explicit action.
+            guard key != .power else { return }
             guard device.token != nil else { return }
             if pendingKeys.count < 10 { pendingKeys.append(key) }
             if socket == nil { open(secure: true, prompting: false) }
@@ -206,10 +312,12 @@ final class LGDriver: TVDriver {
     }
 
     func sendText(_ text: String) {
+        guard state == .connected, !isWaking else { return }
         request("ssap://com.webos.service.ime/insertText", ["text": text, "replace": 0])
     }
 
     func launch(_ app: TVApp) {
+        guard !isWaking else { return }
         guard state == .connected else {
             guard device.token != nil else { return }
             pendingLaunch = app

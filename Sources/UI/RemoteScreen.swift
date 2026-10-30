@@ -150,7 +150,8 @@ private struct TopBar: View {
     var body: some View {
         HStack(spacing: 12) {
             // Where the TV has a separate full power-off (Samsung), holding the key sends it.
-            KeyCap(shape: Circle(), tint: Theme.power, accessibilityLabel: "Power",
+            KeyCap(shape: Circle(), tint: Theme.power, enabled: !model.isWakingTV,
+                   accessibilityLabel: model.current?.brand == .lg && model.state != .connected ? "Wake TV" : "Power",
                    holdAction: model.supports(.powerOff) ? { model.press(.powerOff) } : nil,
                    holdName: "Turn off TV") {
                 model.press(.power)
@@ -200,8 +201,8 @@ private struct StatusLine: View {
         case .idle: (model.current == nil ? "No TV selected" : "Ready", Theme.secondary)
         }
         HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.secondary)
+            Circle().fill(model.isWakingTV ? .yellow : color).frame(width: 6, height: 6)
+            Text(model.isWakingTV ? "Waking…" : text).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.secondary)
         }
     }
 }
@@ -212,7 +213,11 @@ private struct StatusBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.current == nil {
+        if model.isWakingTV {
+            card(symbol: "power", title: "Waking TV…",
+                 message: "Waiting for your TV to reconnect. This can take a few seconds.",
+                 action: "Cancel wake") { model.cancelWakeTV() }
+        } else if model.current == nil {
             card(symbol: "sparkle.magnifyingglass", title: "Let's find your TV",
                  message: "Open Remote works with Google TV, Android TV, Roku, Samsung and LG TVs on your Wi-Fi.",
                  action: "Find TVs") { model.showingDevices = true }
@@ -221,12 +226,21 @@ private struct StatusBanner: View {
             case .unpaired:
                 card(symbol: "link", title: "Pair with \(device.name)",
                      message: device.brand.pairingExplanation, action: "Pair") { model.startPairing() }
-            case .failed where model.isRelocating:
+            case .failed where model.isRelocating && device.brand != .lg:
                 card(symbol: "dot.radiowaves.left.and.right", title: "Looking for \(device.name)…",
                      message: "It may have moved to a new address on your network.", action: nil) {}
             case .failed(let message):
-                card(symbol: "wifi.exclamationmark", title: "Can't reach \(device.name)",
-                     message: message, action: "Try again") { model.reconnect() }
+                VStack(spacing: 10) {
+                    card(symbol: "wifi.exclamationmark", title: "Can't reach \(device.name)",
+                         message: message, action: "Try again") { model.reconnect() }
+                    if device.brand == .lg && device.hasCredentials {
+                        Button(device.macAddress == nil ? "Set up Wake-on-LAN" : "Wake TV", systemImage: "power") {
+                            if device.macAddress == nil { model.showingSettings = true }
+                            else { model.wakeTV() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
             default:
                 EmptyView()
             }

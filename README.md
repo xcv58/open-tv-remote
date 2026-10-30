@@ -17,6 +17,8 @@ xcodegen generate
 open OpenRemote.xcodeproj
 ```
 
+Physical iOS builds need Apple's [Multicast Networking entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast) for Wake-on-LAN broadcast. Request it for your development team and app identifier, then regenerate the provisioning profile. Simulator builds do not verify this capability.
+
 ## License
 
 [MIT](LICENSE)

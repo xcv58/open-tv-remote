@@ -17,6 +17,8 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
 
+                LGWakeSettingsSection()
+
                 JellyfinSettingsSection()
 
                 if model.jellyfin.isReady && !model.jellyfin.pins.isEmpty {
