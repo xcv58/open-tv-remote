@@ -113,7 +113,6 @@ struct PressedKeyboardCharacter: PreferenceKey {
 }
 
 private struct KeyboardCharacterPreview: View {
-    private static let width: CGFloat = 54
     private static let height: CGFloat = 44
     private static let keyClearance: CGFloat = 8
     // The D-pad's backing circle extends six points below its frame.
@@ -123,19 +122,21 @@ private struct KeyboardCharacterPreview: View {
 
     var body: some View {
         GeometryReader { grid in
-            let halfWidth = Self.width / 2
-            let x = min(max(grid[key.bounds].midX, halfWidth), grid.size.width - halfWidth)
+            let keyFrame = grid[key.bounds]
+            let width = min(54, max(36, keyFrame.width))
+            let halfWidth = width / 2
+            let x = min(max(keyFrame.midX, halfWidth), grid.size.width - halfWidth)
             Text(key.text)
                 .font(.system(size: 29, weight: .semibold, design: .rounded))
                 .foregroundStyle(Theme.label)
-                .frame(width: Self.width, height: Self.height)
+                .frame(width: width, height: Self.height)
                 .background {
                     let shape = RoundedRectangle(cornerRadius: 12)
                     shape.fill(Theme.keyTop)
                         .overlay(shape.strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1))
                         .shadow(color: .black.opacity(0.65), radius: 3, y: 1)
                 }
-                .position(x: x, y: -Self.height / 2 - Self.keyClearance)
+                .position(x: x, y: keyFrame.minY - Self.height / 2 - Self.keyClearance)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)

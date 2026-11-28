@@ -16,8 +16,7 @@ struct CursorScreen: View {
     var pageIsActive: () -> Bool = { true }
 
     var body: some View {
-        CursorControls(tvName: model.current?.name ?? "No TV selected",
-                       enabled: model.supportsCursor && model.remoteInputAvailable && pageIsActive(),
+        CursorControls(enabled: model.supportsCursor && model.remoteInputAvailable && pageIsActive(),
                        sessionID: model.currentID, compactHeight: compactHeight, wide: wide,
                        surfaceOnly: surfaceOnly, tabletop: tabletop, scrollStripOnLeading: scrollStripOnLeading,
                        navigationAlignment: navigationAlignment, swapSides: swapSides,
@@ -46,7 +45,6 @@ private struct CursorControls: View {
     @AppStorage("cursor.reverseScroll.v1") private var reverseScroll = false
     @State private var sender: CursorSender
     @State private var showingCursorSettings = false
-    let tvName: String
     let enabled: Bool
     let sessionID: String?
     let compactHeight: Bool
@@ -61,12 +59,11 @@ private struct CursorControls: View {
 
     private var inputEnabled: Bool { enabled && scenePhase == .active && !showingCursorSettings }
 
-    init(tvName: String, enabled: Bool, sessionID: String?, compactHeight: Bool = false,
+    init(enabled: Bool, sessionID: String?, compactHeight: Bool = false,
          wide: Bool = false, surfaceOnly: Bool = false, tabletop: Bool = false, scrollStripOnLeading: Bool = false,
          navigationAlignment: Alignment? = nil, swapSides: (() -> Void)? = nil,
          mode: Binding<RemoteControlMode> = .constant(.cursor), modes: [RemoteControlMode] = RemoteControlMode.allCases,
          send: @escaping (CursorCommand, RemoteInputRequest) async -> Bool) {
-        self.tvName = tvName
         self.enabled = enabled
         self.sessionID = sessionID
         self.compactHeight = compactHeight
@@ -93,12 +90,7 @@ private struct CursorControls: View {
             .frame(maxWidth: navigationAlignment == nil ? .infinity : 440)
             .frame(maxWidth: .infinity, alignment: navigationAlignment ?? .center)
         } controls: {
-            if tabletop {
-                HStack(alignment: .top, spacing: 8) {
-                    controlSurface
-                    cursorSettingsButton
-                }
-            } else if surfaceOnly {
+            if surfaceOnly || tabletop {
                 controlSurface
             } else if compactHeight {
                 HStack(spacing: 16) {
@@ -112,7 +104,6 @@ private struct CursorControls: View {
                         controlSurface
                         settingsScroll
                     } else {
-                        instructions
                         controlSurface
                         HStack(spacing: 12) {
                             actions
@@ -166,7 +157,6 @@ private struct CursorControls: View {
     private var settingsScroll: some View {
         ScrollView {
             VStack(spacing: 16) {
-                instructions
                 actions
                 cursorSettingsButton
             }
@@ -175,36 +165,26 @@ private struct CursorControls: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
-    private var instructions: some View {
-        VStack(spacing: 5) {
-            if dynamicTypeSize.isAccessibilitySize {
-                Text(tvName).font(.caption).foregroundStyle(Theme.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Text(enabled ? "Drag to move · Tap to click" : "Connect to your LG TV first")
-                .font(.system(.headline, design: .rounded))
-            Text(status)
-                .font(.footnote)
-                .foregroundStyle(sender.unavailable ? Theme.power : Theme.secondary)
-                .multilineTextAlignment(.center)
-        }
-    }
-
     private var controlSurface: some View {
         HStack(spacing: 12) {
-            if scrollStripOnLeading { scrollStrip }
+            if scrollStripOnLeading && !tabletop { scrollColumn }
             touchpad
-            if !scrollStripOnLeading { scrollStrip }
+            if !scrollStripOnLeading || tabletop { scrollColumn }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .frame(minHeight: compactHeight ? 108 : dynamicTypeSize.isAccessibilitySize ? 220 : 180)
     }
 
-    private var scrollStrip: some View {
-        CursorScrollStrip(enabled: inputEnabled, activity: sender.scrollActivity,
-                          scroll: { scroll(0, $0) }, release: { sender.release() })
-            .frame(width: dynamicTypeSize.isAccessibilitySize ? 140 : 56)
-            .id(sessionID)
+    private var scrollStripWidth: CGFloat { dynamicTypeSize.isAccessibilitySize ? 140 : 56 }
+
+    private var scrollColumn: some View {
+        VStack(spacing: 8) {
+            if tabletop { cursorSettingsButton }
+            CursorScrollStrip(enabled: inputEnabled, activity: sender.scrollActivity,
+                              scroll: { scroll(0, $0) }, release: { sender.release() })
+                .id(sessionID)
+        }
+        .frame(width: scrollStripWidth)
     }
 
     private var cursorSettingsButton: some View {
@@ -214,7 +194,7 @@ private struct CursorControls: View {
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 18, weight: .semibold))
-                .frame(minWidth: 52, minHeight: 56)
+                .frame(width: tabletop ? scrollStripWidth : 52, height: 56)
                 .background(KeySurface(shape: RoundedRectangle(cornerRadius: 18)))
         }
         .buttonStyle(.plain)
@@ -274,19 +254,16 @@ private struct CursorControls: View {
         ZStack {
             RoundedRectangle(cornerRadius: 30).fill(Theme.well)
             RoundedRectangle(cornerRadius: 30).strokeBorder(Theme.accent.opacity(0.2))
-            VStack(spacing: 12) {
-                Image(systemName: "hand.draw").font(.system(size: 48, weight: .light))
-                if surfaceOnly {
-                    Text(enabled && !sender.unavailable ? "Drag to move · Tap to click" : status)
-                        .font(.subheadline)
-                        .foregroundStyle(sender.unavailable ? Theme.power : Theme.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                } else if !dynamicTypeSize.isAccessibilitySize {
-                    Text("Look at your TV").font(.system(.body, design: .rounded).weight(.medium))
+            ViewThatFits(in: .vertical) {
+                VStack(spacing: 12) {
+                    Image(systemName: "hand.draw").font(.system(size: 48, weight: .light))
+                        .foregroundStyle(Theme.secondary.opacity(0.6))
+                        .accessibilityHidden(true)
+                    touchpadHint
                 }
+                touchpadHint
             }
-            .foregroundStyle(Theme.secondary.opacity(0.6))
+            .padding(12)
             .allowsHitTesting(false)
             #if os(iOS)
             CursorTouchpad(enabled: inputEnabled,
@@ -303,6 +280,19 @@ private struct CursorControls: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 30))
         .accessibilityIdentifier("lgCursorTouchpad")
+    }
+
+    private var touchpadHint: some View {
+        VStack(spacing: 5) {
+            if enabled && !sender.unavailable {
+                Text("Drag to move · Tap to click")
+                    .font(.subheadline.weight(.medium))
+            }
+            Text(status)
+                .font(.footnote)
+                .foregroundStyle(sender.unavailable ? Theme.power : Theme.secondary)
+        }
+        .multilineTextAlignment(.center)
     }
 
     private func action(_ title: String, symbol: String, command: CursorCommand) -> some View {
@@ -557,6 +547,6 @@ private struct MacCursorTouchpad: View {
 #endif
 
 #Preview("LG cursor") {
-    CursorControls(tvName: "Living Room LG", enabled: true, sessionID: "preview") { _, _ in true }
+    CursorControls(enabled: true, sessionID: "preview") { _, _ in true }
         .frame(width: 390, height: 844)
 }

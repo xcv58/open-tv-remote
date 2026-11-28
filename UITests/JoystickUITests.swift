@@ -79,9 +79,11 @@ final class JoystickUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         let touchpad = app.descendants(matching: .any).matching(identifier: "lgCursorTouchpad").firstMatch
         XCTAssertTrue(touchpad.isHittable)
+        assertCursorHintInside(touchpad)
         XCTAssertFalse(app.buttons["Click"].exists)
         XCTAssertFalse(app.sliders["Cursor speed"].exists)
         XCTAssertFalse(app.switches["Reverse scrolling"].exists)
+        captureKeyboard("LG cursor instructions inside the touchpad")
 
         settings.tap()
         let sheet = app.navigationBars["Cursor Settings"]
@@ -458,7 +460,7 @@ final class JoystickUITests: XCTestCase {
         app.buttons["Shift"].tap()
         let capitalQ = app.buttons["Q"]
         XCTAssertTrue(capitalQ.waitForExistence(timeout: 5))
-        try assertHeldCapitalQ(capitalQ, topKey: capitalQ)
+        try assertHeldCapitalQ(capitalQ)
         XCTAssertEqual(app.staticTexts["demoPadInputLog"].label, "1:Q")
         XCTAssertTrue(app.buttons["q"].isHittable)
         app.buttons["q"].tap()
@@ -629,10 +631,9 @@ final class JoystickUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertHeldCapitalQ(_ key: XCUIElement, topKey: XCUIElement) throws {
+    private func assertHeldCapitalQ(_ key: XCUIElement) throws {
         XCTAssertTrue(key.isHittable)
         let keyFrame = key.frame
-        let topFrame = topKey.frame
         let window = app.windows.firstMatch
         let windowFrame = window.frame
         var heldScreenshot: XCUIScreenshot?
@@ -663,8 +664,8 @@ final class JoystickUITests: XCTestCase {
             }
         }
 
-        let previewRegion = CGRect(x: topFrame.minX - 4, y: topFrame.minY - 60,
-                                   width: max(topFrame.width + 16, 64), height: keyFrame.minY - topFrame.minY + 60)
+        let previewRegion = CGRect(x: keyFrame.minX - 10, y: keyFrame.minY - 56,
+                                   width: max(keyFrame.width + 20, 64), height: 56)
         let cropRect = previewRegion.applying(inPixels).integral
         let previewCrop = crop(cropRect)
         let clearance = XCTAttachment(image: previewCrop)
@@ -673,7 +674,10 @@ final class JoystickUITests: XCTestCase {
         let previewBounds = try XCTUnwrap(coloredBounds(in: previewCrop) { red, green, blue in
             green > 100 && Int(green) - Int(red) > 30 && Int(green) - Int(blue) > 12
         }, "Expected the preview outline above the pressed key")
-        XCTAssertLessThan(previewRegion.minY + previewBounds.maxY * previewRegion.height, topFrame.minY)
+        let previewBottom = previewRegion.minY + previewBounds.maxY * previewRegion.height
+        let previewCenter = previewRegion.minX + previewBounds.midX * previewRegion.width
+        XCTAssertEqual(keyFrame.minY - previewBottom, 8, accuracy: 2)
+        XCTAssertEqual(previewCenter, keyFrame.midX, accuracy: 5)
 
         let previewText = CGRect(x: cropRect.minX + previewBounds.minX * cropRect.width,
                                  y: cropRect.minY + previewBounds.minY * cropRect.height,
@@ -1244,9 +1248,24 @@ final class JoystickUITests: XCTestCase {
         XCTAssertLessThan(volume.frame.maxY, touchpad.frame.minY)
         XCTAssertEqual(app.buttons.matching(identifier: "Back").count, 1)
         XCTAssertTrue(settings.isHittable)
+        let strip = app.descendants(matching: .any).matching(identifier: "Scroll strip").firstMatch
+        XCTAssertTrue(strip.isHittable)
+        XCTAssertEqual(settings.frame.midX, strip.frame.midX, accuracy: 1)
+        XCTAssertLessThan(settings.frame.maxY, strip.frame.minY)
+        XCTAssertGreaterThan(strip.frame.minX, touchpad.frame.maxX)
+        assertCursorHintInside(touchpad)
+        captureKeyboard("Duo Tabletop LG cursor")
         settings.tap()
         XCTAssertTrue(app.navigationBars["Cursor Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Scroll with two fingers or the side strip"].exists)
+    }
+
+    private func assertCursorHintInside(_ touchpad: XCUIElement) {
+        for line in ["Drag to move · Tap to click", "Scroll with two fingers or the side strip"] {
+            let hint = app.staticTexts[line].firstMatch
+            XCTAssertTrue(hint.waitForExistence(timeout: 5))
+            XCTAssertTrue(touchpad.frame.contains(hint.frame))
+        }
     }
 
     func testTabletopMediaStaysPutWhenTheReportedAppIsMissing() throws {
@@ -1324,7 +1343,7 @@ final class JoystickUITests: XCTestCase {
         XCTAssertLessThan(app.buttons["Down"].frame.maxY, numberRow.minY)
         captureKeyboard("iPhone Duo open portrait keyboard")
         app.buttons["Shift"].tap()
-        try assertHeldCapitalQ(app.buttons["Q"], topKey: app.buttons["1"])
+        try assertHeldCapitalQ(app.buttons["Q"])
         assertDuoNumberRowAboveLetters()
 
         let space = app.buttons["Space"].frame
